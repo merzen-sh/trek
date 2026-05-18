@@ -8,7 +8,8 @@
             "types": "./parser_wasm.d.ts",
             "import": "./parser_wasm.js",
             "default": "./parser_wasm.js"
-        }
+        },
+        "./*.wasm": "./*.wasm"
     },
     "files": [
         "*.d.ts",

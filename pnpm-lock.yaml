@@ -214,6 +214,8 @@ importers:
         specifier: ^1.65.0
         version: 1.65.0
 
+  npm/trek-wasm-web: {}
+
   packages/api-types: {}
 
   packages/app:
@@ -221,6 +223,9 @@ importers:
       '@tanstack/react-router':
         specifier: ^1.170.4
         version: 1.170.4(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@trek-cli/parser':
+        specifier: workspace:*
+        version: link:../../npm/trek-wasm-web
       lucide-react:
         specifier: ^0.487.0
         version: 0.487.0(react@19.2.6)
