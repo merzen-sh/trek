@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["./crates/trek"]
+members = ["./crates/trek", "./crates/parser"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,14 +15,26 @@ tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 anyhow = "1.0"
 axum = { version = "0.7", default-features = false }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "time"] }
-hyper = { version = "1.0", default-features = false, features = ["http1", "server"] }
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "net",
+    "time",
+] }
+hyper = { version = "1.0", default-features = false, features = [
+    "http1",
+    "server",
+] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 tower-service = "0.3"
 utoipa = "5"
-utoipa-swagger-ui = { version = "8", default-features = false, features = ["axum"] }
+utoipa-swagger-ui = { version = "8", default-features = false, features = [
+    "axum",
+] }
 bytes = "1"
 http-body-util = "0.1"
+indexmap = { version = "2", default-features = false, features = ["serde"] }
+stylua = { version = "2.5", default-features = false, features = ["cfxlua"] }
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
 
 [workspace.lints]
 rust = {}

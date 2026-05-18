@@ -1,0 +1,15 @@
+[package]
+name = "parser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+full_moon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+stylua.workspace = true
+rand.workspace = true
+
+[features]
+wasm = []
