@@ -11,3 +11,6 @@ shadcn comment:
 
 check:
     @cargo check --workspace
+
+shear:
+    @cargo shear --fix
