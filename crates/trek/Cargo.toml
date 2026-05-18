@@ -12,8 +12,13 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 tokio.workspace = true
-hyper.workspace = true
-hyper-util.workspace = true
+hyper = { workspace = true, features = ["http1", "server", "client"] }
+hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1"] }
 tower-service.workspace = true
-utoipa.workspace = true
-utoipa-swagger-ui.workspace = true
+utoipa = { workspace = true, optional = true }
+utoipa-swagger-ui = { workspace = true, optional = true }
+bytes.workspace = true
+http-body-util.workspace = true
+
+[features]
+swagger = ["dep:utoipa", "dep:utoipa-swagger-ui"]

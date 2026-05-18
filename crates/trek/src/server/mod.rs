@@ -46,6 +46,7 @@ impl Server {
 pub fn run_server(port: u16) -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .build()?;
     rt.block_on(Server::new(port).run())?;
     Ok(())
