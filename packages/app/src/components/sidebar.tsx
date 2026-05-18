@@ -4,9 +4,13 @@ import {
   Database,
   Terminal,
   Globe,
+  Settings,
+  Sun,
+  Moon,
 } from "lucide-react"
 import { useAppSetting } from "../lib/use-app-setting"
-import { cn } from "ui"
+import { cn, Card, CardHeader, CardTitle, CardContent } from "ui"
+import { SettingsDialog } from "./settings-dialog"
 
 interface Resource {
   id: string
@@ -65,29 +69,47 @@ function SidebarContent({
   selected,
   onSelect,
   sidebarOpen,
+  settingsOpen,
+  setSettingsOpen,
 }: {
   selected: string
   onSelect: (id: string) => void
   sidebarOpen: boolean
+  settingsOpen: boolean
+  setSettingsOpen: (open: boolean) => void
 }) {
   const active = resources.find((r) => r.id === selected)
+  const theme = useAppSetting((s) => s.theme)
+  const setTheme = useAppSetting((s) => s.setTheme)
 
   return (
     <>
-      <aside className="flex w-16 flex-shrink-0 flex-col items-center gap-3 border-r bg-muted/50 py-3">
-        {resources.map((r) => (
-          <button
-            key={r.id}
-            onClick={() => onSelect(r.id)}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:rounded-lg hover:bg-primary hover:text-primary-foreground",
-              selected === r.id && "rounded-lg bg-primary text-primary-foreground",
-            )}
-            title={r.name}
-          >
-            <r.icon className="h-4 w-4" />
-          </button>
-        ))}
+      <aside className="flex w-16 flex-shrink-0 flex-col items-center border-r bg-muted/50 py-3">
+        <div className="flex flex-col items-center gap-3 flex-1">
+          {resources.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => onSelect(r.id)}
+              className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:rounded-lg hover:bg-primary hover:text-primary-foreground",
+                selected === r.id && "rounded-lg bg-primary text-primary-foreground",
+              )}
+              title={r.name}
+            >
+              <r.icon className="h-4 w-4" />
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setSettingsOpen(!settingsOpen)}
+          className={cn(
+            "flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:rounded-lg hover:bg-primary hover:text-primary-foreground",
+            settingsOpen && "rounded-lg bg-primary text-primary-foreground",
+          )}
+          title="Settings"
+        >
+          <Settings className="h-4 w-4" />
+        </button>
       </aside>
 
       <aside
@@ -121,10 +143,14 @@ function SidebarContent({
 export function Sidebar() {
   const sidebarOpen = useAppSetting((s) => s.sidebarOpen)
   const setSidebarOpen = useAppSetting((s) => s.setSidebarOpen)
+  const theme = useAppSetting((s) => s.theme)
+  const setTheme = useAppSetting((s) => s.setTheme)
   const [selected, setSelected] = useState(resources[0].id)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   function handleSelect(id: string) {
     setSelected(id)
+    setSettingsOpen(false)
     if (!sidebarOpen) setSidebarOpen(true)
   }
 
@@ -155,6 +181,8 @@ export function Sidebar() {
             selected={selected}
             onSelect={handleSelect}
             sidebarOpen={true}
+            settingsOpen={settingsOpen}
+            setSettingsOpen={setSettingsOpen}
           />
         </div>
       </div>
@@ -165,8 +193,13 @@ export function Sidebar() {
           selected={selected}
           onSelect={handleSelect}
           sidebarOpen={sidebarOpen}
+          settingsOpen={settingsOpen}
+          setSettingsOpen={setSettingsOpen}
         />
       </div>
+
+      {/* Settings Dialog */}
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   )
 }

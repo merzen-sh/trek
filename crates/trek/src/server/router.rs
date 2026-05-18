@@ -1,4 +1,5 @@
 use axum::Router;
+use axum::routing::get;
 
 #[cfg(feature = "swagger")]
 mod swagger {
@@ -11,7 +12,7 @@ mod swagger {
     struct ApiDoc;
 
     pub fn router() -> Router {
-        Router::new().merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))
+        Router::new().merge(SwaggerUi::new("/swagger-ui").url("/api/openapi.json", ApiDoc::openapi()))
     }
 }
 
@@ -97,11 +98,13 @@ mod proxy {
 }
 
 pub fn create() -> Router {
-    let router = Router::new();
+    let router = Router::new()
+        .route("/api/health", get(|| async { "OK" }));
 
     #[cfg(feature = "swagger")]
-    let router = router.nest("/api", swagger::router());
+    let router = router.merge(swagger::router());
 
+    // fallback to SPA at / - SPA handles all client-side routing
     let router = router.fallback(proxy::handler);
 
     router

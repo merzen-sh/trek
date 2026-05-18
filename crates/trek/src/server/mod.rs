@@ -44,6 +44,9 @@ impl Server {
 }
 
 pub fn run_server(port: u16) -> anyhow::Result<()> {
+    #[cfg(all(not(feature = "swagger"), debug_assertions))]
+    tracing::warn!("!!! swagger disabled. Enable swagger feature for debug builds");
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
