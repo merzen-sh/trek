@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Monitor, Database, Terminal, Globe, Settings, Sun, Moon } from "lucide-react";
+import { Monitor, Database, Terminal, Globe, Settings } from "lucide-react";
 import { useAppSetting } from "../lib/use-app-setting";
-import { cn, Card, CardHeader, CardTitle, CardContent } from "ui";
+import { cn } from "ui";
 import { SettingsDialog } from "./settings-dialog";
 
 interface Resource {

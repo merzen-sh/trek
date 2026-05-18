@@ -1,3 +1,4 @@
+mod health;
 mod router;
 
 use hyper::Request;

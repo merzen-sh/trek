@@ -1,0 +1,5 @@
+apis:
+  default:
+    root: "http://localhost:8080/api/openapi.json"
+    x-openapi-ts:
+      output: "./src/types/api-types.d.ts"
