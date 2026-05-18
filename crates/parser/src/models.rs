@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub type ConfigIR = IndexMap<String, ConfigNode>;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConfigNode {
     String(StringValue),
@@ -20,35 +20,35 @@ pub enum ConfigNode {
     Array(ArrayValue),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct StringValue {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct NumberValue {
     pub value: f64,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct BooleanValue {
     pub value: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct EnumValue {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct Vector2Value {
     pub x: f64,
     pub y: f64,
@@ -56,7 +56,7 @@ pub struct Vector2Value {
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct Vector3Value {
     pub x: f64,
     pub y: f64,
@@ -65,7 +65,7 @@ pub struct Vector3Value {
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct TableValue {
     pub fields: IndexMap<String, ConfigNode>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -74,41 +74,41 @@ pub struct TableValue {
 
 pub type Row = IndexMap<String, serde_json::Value>;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct DynamicTableValue {
     pub rows: Vec<Row>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct ArrayValue {
     pub items: Vec<ConfigNode>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct FunctionValue {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct ExpressionValue {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct NilValue {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, schemars::JsonSchema)]
 pub struct FieldMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -126,25 +126,25 @@ pub struct FieldMetadata {
     pub table_schema: Option<TableSchema>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct RangeValue {
     pub min: f64,
     pub max: f64,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct FunctionInfo {
     pub resource_name: String,
     pub function_name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct TableSchema {
     pub layout: String,
     pub schema: Vec<ColumnSchema>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
 pub struct ColumnSchema {
     pub name: String,
     #[serde(rename = "type")]

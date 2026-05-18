@@ -13,3 +13,8 @@ pub fn json_to_lua(json: &str) -> Result<String, String> {
         serde_json::from_str(json).map_err(|e| format!("deserialization error: {e}"))?;
     generator::generate_lua(&ir)
 }
+
+pub fn generate_schema() -> String {
+    let schema = schemars::schema_for!(models::ConfigIR);
+    serde_json::to_string_pretty(&schema).unwrap()
+}

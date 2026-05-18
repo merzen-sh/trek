@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["./crates/trek", "./crates/parser"]
+members = ["./crates/trek", "./crates/parser", "crates/parser-wasm"]
 
 [workspace.package]
 version = "0.1.0"
