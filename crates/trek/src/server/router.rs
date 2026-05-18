@@ -12,7 +12,8 @@ mod swagger {
     struct ApiDoc;
 
     pub fn router() -> Router {
-        Router::new().merge(SwaggerUi::new("/swagger-ui").url("/api/openapi.json", ApiDoc::openapi()))
+        Router::new()
+            .merge(SwaggerUi::new("/swagger-ui").url("/api/openapi.json", ApiDoc::openapi()))
     }
 }
 
@@ -98,8 +99,7 @@ mod proxy {
 }
 
 pub fn create() -> Router {
-    let router = Router::new()
-        .route("/api/health", get(|| async { "OK" }));
+    let router = Router::new().route("/api/health", get(|| async { "OK" }));
 
     #[cfg(feature = "swagger")]
     let router = router.merge(swagger::router());

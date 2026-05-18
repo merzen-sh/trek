@@ -12,13 +12,14 @@
           var stored = JSON.parse(localStorage.getItem("app_setting") || "{}");
           if (stored.theme) theme = stored.theme;
         } catch (e) {}
-        var resolved = theme === "dark"
-          ? "dark"
-          : theme === "light"
-            ? "light"
-            : window.matchMedia("(prefers-color-scheme: dark)").matches
-              ? "dark"
-              : "light";
+        var resolved =
+          theme === "dark"
+            ? "dark"
+            : theme === "light"
+              ? "light"
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
         document.documentElement.classList.add(resolved);
       })();
     </script>

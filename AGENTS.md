@@ -20,13 +20,13 @@ Optional, off by default: `--features swagger` adds `/api/swagger-ui` + `/api/op
 
 ## Commands
 
-| what | how |
-|---|---|
-| run backend | `just dev` (= `cargo run -p trek`) |
-| format all | `just fmt` (= `cargo fmt && pnpm oxfmt .`) |
-| check | `cargo check` |
-| release build | `cargo build --release` |
-| with swagger | `cargo check --features swagger` / `cargo run -p trek --features swagger` |
+| what          | how                                                                       |
+| ------------- | ------------------------------------------------------------------------- |
+| run backend   | `just dev` (= `cargo run -p trek`)                                        |
+| format all    | `just fmt` (= `cargo fmt && pnpm oxfmt .`)                                |
+| check         | `cargo check`                                                             |
+| release build | `cargo build --release`                                                   |
+| with swagger  | `cargo check --features swagger` / `cargo run -p trek --features swagger` |
 
 ## Toolchain
 
@@ -39,6 +39,7 @@ Optional, off by default: `--features swagger` adds `/api/swagger-ui` + `/api/op
 ## Routing
 
 Router is built in `src/server/router.rs`:
+
 - `mod swagger` — behind `#[cfg(feature = "swagger")]`, mounted at `/api`
 - `mod proxy` — always compiled, catch-all fallback forwarding to upstream
 - New routes or API handlers go in `router.rs` or a new module referenced from it.

@@ -2,21 +2,21 @@
   "name": "trek",
   "version": "1.0.0",
   "description": "",
+  "keywords": [],
+  "license": "ISC",
+  "author": "",
+  "type": "module",
   "main": "index.js",
   "scripts": {},
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "dependencies": {
+    "oxfmt": "^0.50.0",
+    "oxlint": "^1.65.0"
+  },
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
       "version": "^11.1.2",
       "onFail": "download"
     }
-  },
-  "type": "module",
-  "dependencies": {
-    "oxfmt": "^0.50.0",
-    "oxlint": "^1.65.0"
   }
 }

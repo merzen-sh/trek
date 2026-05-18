@@ -1,22 +1,14 @@
-import { useState } from "react"
-import {
-  Monitor,
-  Database,
-  Terminal,
-  Globe,
-  Settings,
-  Sun,
-  Moon,
-} from "lucide-react"
-import { useAppSetting } from "../lib/use-app-setting"
-import { cn, Card, CardHeader, CardTitle, CardContent } from "ui"
-import { SettingsDialog } from "./settings-dialog"
+import { useState } from "react";
+import { Monitor, Database, Terminal, Globe, Settings, Sun, Moon } from "lucide-react";
+import { useAppSetting } from "../lib/use-app-setting";
+import { cn, Card, CardHeader, CardTitle, CardContent } from "ui";
+import { SettingsDialog } from "./settings-dialog";
 
 interface Resource {
-  id: string
-  name: string
-  icon: typeof Monitor
-  menus: { label: string }[]
+  id: string;
+  name: string;
+  icon: typeof Monitor;
+  menus: { label: string }[];
 }
 
 const resources: Resource[] = [
@@ -24,46 +16,27 @@ const resources: Resource[] = [
     id: "server",
     name: "Display Server",
     icon: Monitor,
-    menus: [
-      { label: "Overview" },
-      { label: "Logs" },
-      { label: "Metrics" },
-      { label: "Settings" },
-    ],
+    menus: [{ label: "Overview" }, { label: "Logs" }, { label: "Metrics" }, { label: "Settings" }],
   },
   {
     id: "database",
     name: "Database",
     icon: Database,
-    menus: [
-      { label: "Tables" },
-      { label: "Queries" },
-      { label: "Backups" },
-      { label: "Config" },
-    ],
+    menus: [{ label: "Tables" }, { label: "Queries" }, { label: "Backups" }, { label: "Config" }],
   },
   {
     id: "terminal",
     name: "Terminal",
     icon: Terminal,
-    menus: [
-      { label: "Sessions" },
-      { label: "Commands" },
-      { label: "History" },
-    ],
+    menus: [{ label: "Sessions" }, { label: "Commands" }, { label: "History" }],
   },
   {
     id: "globe",
     name: "Network",
     icon: Globe,
-    menus: [
-      { label: "Endpoints" },
-      { label: "Routes" },
-      { label: "Firewall" },
-      { label: "DNS" },
-    ],
+    menus: [{ label: "Endpoints" }, { label: "Routes" }, { label: "Firewall" }, { label: "DNS" }],
   },
-]
+];
 
 function SidebarContent({
   selected,
@@ -72,27 +45,25 @@ function SidebarContent({
   settingsOpen,
   setSettingsOpen,
 }: {
-  selected: string
-  onSelect: (id: string) => void
-  sidebarOpen: boolean
-  settingsOpen: boolean
-  setSettingsOpen: (open: boolean) => void
+  selected: string;
+  onSelect: (id: string) => void;
+  sidebarOpen: boolean;
+  settingsOpen: boolean;
+  setSettingsOpen: (open: boolean) => void;
 }) {
-  const active = resources.find((r) => r.id === selected)
-  const theme = useAppSetting((s) => s.theme)
-  const setTheme = useAppSetting((s) => s.setTheme)
+  const active = resources.find((r) => r.id === selected);
 
   return (
     <>
-      <aside className="flex w-16 flex-shrink-0 flex-col items-center border-r bg-muted/50 py-3">
+      <aside className="flex w-14 flex-shrink-0 flex-col items-center border-r bg-background py-3">
         <div className="flex flex-col items-center gap-3 flex-1">
           {resources.map((r) => (
             <button
               key={r.id}
               onClick={() => onSelect(r.id)}
               className={cn(
-                "flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:rounded-lg hover:bg-primary hover:text-primary-foreground",
-                selected === r.id && "rounded-lg bg-primary text-primary-foreground",
+                "flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary hover:text-primary-foreground",
+                selected === r.id && "rounded-md bg-primary text-primary-foreground",
               )}
               title={r.name}
             >
@@ -114,8 +85,8 @@ function SidebarContent({
 
       <aside
         className={cn(
-          "overflow-hidden border-r bg-muted/20 transition-all duration-200",
-          sidebarOpen ? "w-60" : "w-0",
+          "overflow-hidden bg-background transition-all duration-200",
+          sidebarOpen ? "border-r w-60" : "w-0",
         )}
       >
         {active && (
@@ -137,21 +108,19 @@ function SidebarContent({
         )}
       </aside>
     </>
-  )
+  );
 }
 
 export function Sidebar() {
-  const sidebarOpen = useAppSetting((s) => s.sidebarOpen)
-  const setSidebarOpen = useAppSetting((s) => s.setSidebarOpen)
-  const theme = useAppSetting((s) => s.theme)
-  const setTheme = useAppSetting((s) => s.setTheme)
-  const [selected, setSelected] = useState(resources[0].id)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const sidebarOpen = useAppSetting((s) => s.sidebarOpen);
+  const setSidebarOpen = useAppSetting((s) => s.setSidebarOpen);
+  const [selected, setSelected] = useState(resources[0].id);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   function handleSelect(id: string) {
-    setSelected(id)
-    setSettingsOpen(false)
-    if (!sidebarOpen) setSidebarOpen(true)
+    setSelected(id);
+    setSettingsOpen(false);
+    if (!sidebarOpen) setSidebarOpen(true);
   }
 
   return (
@@ -201,5 +170,5 @@ export function Sidebar() {
       {/* Settings Dialog */}
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
-  )
+  );
 }
