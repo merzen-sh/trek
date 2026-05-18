@@ -4,3 +4,7 @@ dev:
 fmt:
     @cargo fmt
     @pnpm oxfmt .
+
+[working-directory("./packages/ui")]
+shadcn comment:
+    @pnpm run shadcn add {{ comment }} --yes
