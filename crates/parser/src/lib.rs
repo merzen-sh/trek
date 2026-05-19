@@ -23,3 +23,9 @@ pub fn generate_schema() -> String {
     let schema = schemars::schema_for!(models::ConfigIR);
     serde_json::to_string_pretty(&schema).unwrap()
 }
+
+pub fn validate(source: &str) -> Result<(), String> {
+    let ir = visitor::build_ir(source)?;
+    visitor::validate_ir(&ir)?;
+    Ok(())
+}
