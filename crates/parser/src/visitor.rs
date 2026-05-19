@@ -13,31 +13,176 @@ pub fn build_ir(source: &str) -> Result<ConfigIR, String> {
         format!("parse error: {}", msgs.join("; "))
     })?;
     for stmt in ast.nodes().stmts() {
-        if let Some(ir) = try_extract_config_assignment(stmt) {
-            return Ok(ir);
+        match try_extract_config_assignment(stmt) {
+            Ok(Some(ir)) => return Ok(ir),
+            Ok(None) => {}
+            Err(e) => return Err(e),
         }
     }
     Err("no config table assignment found".to_string())
 }
 
-fn try_extract_config_assignment(stmt: &Stmt) -> Option<ConfigIR> {
+pub fn validate_ir(ir: &ConfigIR) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for (key, node) in ir {
+        collect_validation_errors(key, node, "", &mut errors);
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
+fn collect_validation_errors(
+    field_name: &str,
+    node: &ConfigNode,
+    path: &str,
+    errors: &mut Vec<String>,
+) {
+    let prefix = if path.is_empty() {
+        field_name.to_string()
+    } else {
+        format!("{}.{}", path, field_name)
+    };
+
+    let meta = match node {
+        ConfigNode::String(s) => s.metadata.as_deref(),
+        ConfigNode::Number(n) => n.metadata.as_deref(),
+        ConfigNode::Boolean(b) => b.metadata.as_deref(),
+        ConfigNode::Enum(e) => e.metadata.as_deref(),
+        ConfigNode::Vector2(v) => v.metadata.as_deref(),
+        ConfigNode::Vector3(v) => v.metadata.as_deref(),
+        ConfigNode::Table(t) => t.metadata.as_deref(),
+        ConfigNode::DynamicTable(d) => d.metadata.as_deref(),
+        ConfigNode::Function(f) => f.metadata.as_deref(),
+        ConfigNode::Expression(e) => e.metadata.as_deref(),
+        ConfigNode::Nil(n) => n.metadata.as_deref(),
+        ConfigNode::Array(a) => a.metadata.as_deref(),
+    };
+
+    let Some(meta) = meta else { return };
+
+    // RANGE can only apply to Number
+    if meta.range.is_some() && !matches!(node, ConfigNode::Number(_)) {
+        errors.push(format!(
+            "Validation Error: Field '{}' has RANGE annotation but is not a number",
+            prefix
+        ));
+    }
+
+    // ENUM can only apply to String or Enum
+    if let Some(options) = &meta.enum_options {
+        if options.is_empty() {
+            errors.push(format!(
+                "Validation Error: Field '{}' has empty ENUM options list",
+                prefix
+            ));
+        }
+        match node {
+            ConfigNode::Enum(ev) => {
+                if !options.contains(&ev.value) {
+                    errors.push(format!(
+                        "Validation Error: Field '{}' value '{}' not in ENUM options [{}]",
+                        prefix,
+                        ev.value,
+                        options.join(", ")
+                    ));
+                }
+            }
+            ConfigNode::String(sv) => {
+                if !options.contains(&sv.value) {
+                    errors.push(format!(
+                        "Validation Error: Field '{}' value '{}' not in ENUM options [{}]",
+                        prefix,
+                        sv.value,
+                        options.join(", ")
+                    ));
+                }
+            }
+            _ => {
+                errors.push(format!(
+                    "Validation Error: Field '{}' has ENUM annotation but value is not a string",
+                    prefix
+                ));
+            }
+        }
+    }
+
+    // MAP can only apply to Vector2 or Vector3
+    if let Some(true) = meta.map {
+        if !matches!(node, ConfigNode::Vector2(_) | ConfigNode::Vector3(_)) {
+            errors.push(format!(
+                "Validation Error: Field '{}' has MAP=true annotation but is not a vector2/vector3",
+                prefix
+            ));
+        }
+    }
+
+    // RANGE bounds
+    if let Some(range) = &meta.range {
+        if let ConfigNode::Number(nv) = node {
+            if nv.value < range.min || nv.value > range.max {
+                errors.push(format!(
+                    "Validation Error: Field '{}' value {} is outside RANGE [{}, {}]",
+                    prefix, nv.value, range.min, range.max
+                ));
+            }
+        }
+    }
+
+    // CFX_FUNCTION can only apply to Function or Expression
+    if meta.function_info.is_some() {
+        if !matches!(node, ConfigNode::Function(_) | ConfigNode::Expression(_)) {
+            errors.push(format!(
+                "Validation Error: Field '{}' has CFX_FUNCTION annotation but value is not a function",
+                prefix
+            ));
+        }
+    }
+
+    // Recursively validate sub-tables
+    match node {
+        ConfigNode::Table(t) => {
+            for (k, v) in &t.fields {
+                collect_validation_errors(k, v, &prefix, errors);
+            }
+        }
+        ConfigNode::Array(a) => {
+            for (i, v) in a.items.iter().enumerate() {
+                let idx = format!("{}[{}]", prefix, i);
+                // Only recurse into table elements
+                if let ConfigNode::Table(t) = v {
+                    for (k, sub) in &t.fields {
+                        collect_validation_errors(k, sub, &idx, errors);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn try_extract_config_assignment(stmt: &Stmt) -> Result<Option<ConfigIR>, String> {
     let assignment = match stmt {
         Stmt::Assignment(a) => a,
-        _ => return None,
+        _ => return Ok(None),
     };
     for (var, expr) in assignment
         .variables()
         .iter()
         .zip(assignment.expressions().iter())
     {
-        var_name_str(var)?;
+        if var_name_str(var).is_none() {
+            continue;
+        }
         let tc = match expr {
             Expression::TableConstructor(tc) => tc,
             _ => continue,
         };
-        return Some(visit_table(tc));
+        return visit_table(tc).map(Some);
     }
-    None
+    Ok(None)
 }
 
 fn var_name_str(var: &Var) -> Option<String> {
@@ -52,7 +197,7 @@ fn token_text(t: &TokenReference) -> String {
     t.token().to_string()
 }
 
-pub fn visit_table(tc: &TableConstructor) -> ConfigIR {
+pub fn visit_table(tc: &TableConstructor) -> Result<ConfigIR, String> {
     let mut result = IndexMap::new();
     for field in tc.fields().iter() {
         let (key, expr) = match field_key_expr(field) {
@@ -60,27 +205,79 @@ pub fn visit_table(tc: &TableConstructor) -> ConfigIR {
             None => continue,
         };
         let meta = extract_metadata_from_trivia(field);
-        let node = visit_expression(expr, meta);
+        let node = visit_expression(expr, meta)?;
+        check_lua_key_ok(&key, &field)?;
+        if result.contains_key(&key) {
+            let line = field_line(field);
+            return Err(format!(
+                "line {}: Duplicate key '{}' in table constructor",
+                line, key
+            ));
+        }
         result.insert(key, node);
     }
-    result
+    Ok(result)
 }
 
-fn visit_field(field: &Field) -> ConfigNode {
+fn field_line(field: &Field) -> usize {
+    match field {
+        Field::NameKey { key, .. } => key.start_position().line(),
+        Field::ExpressionKey { key, .. } => match key {
+            Expression::String(token) => token.start_position().line(),
+            _ => 0,
+        },
+        Field::NoKey(expr) => expr_line(expr),
+        _ => 0,
+    }
+}
+
+fn expr_line(expr: &Expression) -> usize {
+    match expr {
+        Expression::String(token) => token.start_position().line(),
+        Expression::Number(token) => token.start_position().line(),
+        Expression::Symbol(token) => token.start_position().line(),
+        Expression::TableConstructor(tc) => {
+            tc.fields().iter().next().map(|f| field_line(f)).unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
+fn check_lua_key_ok(key: &str, field: &Field) -> Result<(), String> {
+    let line = field_line(field);
+    if key.is_empty() {
+        return Err(format!("line {}: Empty string used as table key", line));
+    }
+    if key.contains('\0') {
+        return Err(format!(
+            "line {}: Key contains null byte: '{}'",
+            line, key
+        ));
+    }
+    if key.len() > 200 {
+        return Err(format!(
+            "line {}: Key exceeds maximum length (200 chars): '{}'",
+            line, &key[..40]
+        ));
+    }
+    Ok(())
+}
+
+fn visit_field(field: &Field) -> Result<ConfigNode, String> {
     let meta = extract_metadata_from_trivia(field);
     let expr = match field {
         Field::NameKey { value, .. } | Field::ExpressionKey { value, .. } => value,
         Field::NoKey(expr) => expr,
-        _ => return ConfigNode::Nil(NilValue { metadata: None }),
+        _ => return Ok(ConfigNode::Nil(NilValue { metadata: None })),
     };
     visit_expression(expr, meta)
 }
 
-fn visit_expression(expr: &Expression, meta: FieldMetadata) -> ConfigNode {
+fn visit_expression(expr: &Expression, meta: FieldMetadata) -> Result<ConfigNode, String> {
     match expr {
         Expression::String(token) => {
             let value = token_string_value(token);
-            maybe_enum(value, meta)
+            Ok(maybe_enum(value, meta))
         }
         Expression::Number(token) => {
             let raw = token.token().to_string();
@@ -91,79 +288,78 @@ fn visit_expression(expr: &Expression, meta: FieldMetadata) -> ConfigNode {
                 eprintln!("  full token: '{}'", token.to_string());
                 0.0
             });
-            node_with_meta(
+            Ok(node_with_meta(
                 ConfigNode::Number(NumberValue {
                     value,
                     metadata: None,
                 }),
                 meta,
-            )
+            ))
         }
         Expression::Symbol(token) => {
             let s = token_text(token);
             match s.as_str() {
-                "true" => node_with_meta(
+                "true" => Ok(node_with_meta(
                     ConfigNode::Boolean(BooleanValue {
                         value: true,
                         metadata: None,
                     }),
                     meta,
-                ),
-                "false" => node_with_meta(
+                )),
+                "false" => Ok(node_with_meta(
                     ConfigNode::Boolean(BooleanValue {
                         value: false,
                         metadata: None,
                     }),
                     meta,
-                ),
-                "nil" => node_with_meta(ConfigNode::Nil(NilValue { metadata: None }), meta),
-                _ => node_with_meta(
+                )),
+                "nil" => Ok(node_with_meta(ConfigNode::Nil(NilValue { metadata: None }), meta)),
+                _ => Ok(node_with_meta(
                     ConfigNode::Expression(ExpressionValue {
                         value: s,
                         metadata: None,
                     }),
                     meta,
-                ),
+                )),
             }
         }
         Expression::TableConstructor(tc) => visit_table_value(tc, meta),
-        Expression::FunctionCall(fc) => visit_function_call(fc, meta),
+        Expression::FunctionCall(fc) => Ok(visit_function_call(fc, meta)),
         Expression::Function(anon_fn) => {
             let value = anon_fn.to_string();
             if value.starts_with("function") {
-                node_with_meta(
+                Ok(node_with_meta(
                     ConfigNode::Function(FunctionValue {
                         value,
                         metadata: None,
                     }),
                     meta,
-                )
+                ))
             } else {
-                node_with_meta(
+                Ok(node_with_meta(
                     ConfigNode::Expression(ExpressionValue {
                         value,
                         metadata: None,
                     }),
                     meta,
-                )
+                ))
             }
         }
         Expression::UnaryOperator { unop, expression } => {
-            // Handle negative number literals: -5, -42.5, etc.
             if let UnOp::Minus(_) = unop {
                 if let Expression::Number(token) = expression.as_ref() {
                     if let Ok(val) = token.token().to_string().parse::<f64>() {
-                        return node_with_meta(
+                        return Ok(node_with_meta(
                             ConfigNode::Number(NumberValue {
                                 value: -val,
                                 metadata: None,
                             }),
                             meta,
-                        );
+                        ));
                     }
                 }
             }
-            let inner = visit_expression(expression, FieldMetadata::default());
+            let inner = visit_expression(expression, FieldMetadata::default())?;
             let inner_str = expr_to_str(&inner);
             let op_str = match unop {
                 UnOp::Minus(_) => "-",
@@ -171,61 +367,61 @@ fn visit_expression(expr: &Expression, meta: FieldMetadata) -> ConfigNode {
                 UnOp::Hash(_) => "#",
                 _ => "",
             };
-            node_with_meta(
+            Ok(node_with_meta(
                 ConfigNode::Expression(ExpressionValue {
                     value: format!("{op_str}{inner_str}"),
                     metadata: None,
                 }),
                 meta,
-            )
+            ))
         }
         Expression::BinaryOperator { lhs, binop, rhs } => {
-            let lhs_str = expr_to_str(&visit_expression(lhs, FieldMetadata::default()));
-            let rhs_str = expr_to_str(&visit_expression(rhs, FieldMetadata::default()));
+            let lhs_str = expr_to_str(&visit_expression(lhs, FieldMetadata::default())?);
+            let rhs_str = expr_to_str(&visit_expression(rhs, FieldMetadata::default())?);
             let op_str = binop_operator_str(binop);
-            node_with_meta(
+            Ok(node_with_meta(
                 ConfigNode::Expression(ExpressionValue {
                     value: format!("{lhs_str} {op_str} {rhs_str}"),
                     metadata: None,
                 }),
                 meta,
-            )
+            ))
         }
         Expression::Parentheses { expression, .. } => {
-            let inner = visit_expression(expression, FieldMetadata::default());
+            let inner = visit_expression(expression, FieldMetadata::default())?;
             let inner_str = expr_to_str(&inner);
-            node_with_meta(
+            Ok(node_with_meta(
                 ConfigNode::Expression(ExpressionValue {
                     value: format!("({inner_str})"),
                     metadata: None,
                 }),
                 meta,
-            )
+            ))
         }
         _ => {
             let value = expr.to_string();
             if value.starts_with("function") || value.starts_with("function(") {
-                node_with_meta(
+                Ok(node_with_meta(
                     ConfigNode::Function(FunctionValue {
                         value,
                         metadata: None,
                     }),
                     meta,
-                )
+                ))
             } else {
-                node_with_meta(
+                Ok(node_with_meta(
                     ConfigNode::Expression(ExpressionValue {
                         value,
                         metadata: None,
                     }),
                     meta,
-                )
+                ))
             }
         }
     }
 }
 
-fn visit_table_value(tc: &TableConstructor, meta: FieldMetadata) -> ConfigNode {
+fn visit_table_value(tc: &TableConstructor, meta: FieldMetadata) -> Result<ConfigNode, String> {
     if let Some(schema) = &meta.table_schema {
         if schema.layout == "items" {
             let mut rows = Vec::new();
@@ -234,32 +430,31 @@ fn visit_table_value(tc: &TableConstructor, meta: FieldMetadata) -> ConfigNode {
                     Some(k) => k,
                     None => continue,
                 };
+                check_lua_key_ok(&row_key, &field)?;
                 let mut row = IndexMap::new();
                 row.insert("_key".to_string(), serde_json::Value::String(row_key));
                 populate_dynamic_row(field, &mut row);
                 rows.push(row);
             }
-            return ConfigNode::DynamicTable(DynamicTableValue {
+            return Ok(ConfigNode::DynamicTable(DynamicTableValue {
                 rows,
                 metadata: Some(Box::new(meta)),
-            });
+            }));
         }
     }
 
-    // Detect array: all fields are NoKey (positional) and there is at least one field
-    // (an empty {} should remain a Table, not become an Array)
     let has_fields = tc.fields().iter().next().is_some();
     let all_nokey = has_fields && tc.fields().iter().all(|f| matches!(f, Field::NoKey(_)));
     if all_nokey {
         let mut items = Vec::new();
         for field in tc.fields().iter() {
-            let node = visit_field(field);
+            let node = visit_field(field)?;
             items.push(node);
         }
-        return ConfigNode::Array(ArrayValue {
+        return Ok(ConfigNode::Array(ArrayValue {
             items,
             metadata: Some(Box::new(meta)),
-        });
+        }));
     }
 
     let mut fields = IndexMap::new();
@@ -268,13 +463,21 @@ fn visit_table_value(tc: &TableConstructor, meta: FieldMetadata) -> ConfigNode {
             Some(kv) => kv,
             None => continue,
         };
-        let node = visit_field(field);
+        check_lua_key_ok(&key, &field)?;
+        let node = visit_field(field)?;
+        if fields.contains_key(&key) {
+            let line = field_line(field);
+            return Err(format!(
+                "line {}: Duplicate key '{}' in table constructor",
+                line, key
+            ));
+        }
         fields.insert(key, node);
     }
-    ConfigNode::Table(TableValue {
+    Ok(ConfigNode::Table(TableValue {
         fields,
         metadata: Some(Box::new(meta)),
-    })
+    }))
 }
 
 fn populate_dynamic_row(field: &Field, row: &mut IndexMap<String, serde_json::Value>) {

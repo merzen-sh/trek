@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use parser::models::*;
-use parser::{generator, visitor};
+use parser::visitor;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
@@ -10,7 +10,6 @@ config = {
     --//Top level description
     title = "main_config",
     --//Enable feature
-    --!MAP = true
     feature_enabled = true,
     --//Nested shop config
     shop = {

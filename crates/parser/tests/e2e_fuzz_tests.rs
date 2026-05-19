@@ -12,7 +12,6 @@ config = {
     --//Top level description
     title = "main_config",
     --//Enable feature
-    --!MAP = true
     feature_enabled = true,
     --//Nested shop config
     shop = {
@@ -82,11 +81,15 @@ config = {
 
 const FIXTURE_METADATA_HEAVY: &str = r#"
 config = {
-    --//Field with all annotation types
+    --//Field with enum annotation
     --!ENUM = { "x", "y", "z" }
+    choice = "x",
+    --//Field with range annotation
     --!RANGE = { min = 1, max = 10 }
+    count = 5,
+    --//Field with map annotation
     --!MAP = true
-    complex = "x",
+    position = vector3(1.0, 2.0, 3.0),
     --//Deeply nested metadata
     deep = {
         --//Level 1
