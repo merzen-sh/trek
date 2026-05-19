@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import Editor from "@monaco-editor/react";
+import { useState, useEffect, useRef } from "react";
+import Editor, { useMonaco } from "@monaco-editor/react";
 import { useWasm } from "../hooks/use-wasm";
 import { useAppSetting } from "../lib/use-app-setting";
 import { Button } from "ui";
@@ -13,6 +13,8 @@ import {
   Download,
   Check,
   RefreshCw,
+  Sparkles,
+  Terminal,
 } from "lucide-react";
 
 const DEFAULT_LUA_TEMPLATE = `--// Top Level Config
@@ -107,9 +109,27 @@ const DEFAULT_JSON_TEMPLATE = `{
   }
 }`;
 
+interface Diagnostic {
+  severity: "Error" | "Warning";
+  line: number;
+  character: number;
+  message: string;
+  source: string;
+}
+
+interface LintResult {
+  success: boolean;
+  diagnostics: Diagnostic[];
+  data?: any;
+}
+
 export function ConverterPage() {
   const { ready, error: wasmError, wasm, loading } = useWasm();
   const theme = useAppSetting((s) => s.theme);
+  const monaco = useMonaco();
+
+  // References
+  const editorRef = useRef<any>(null);
 
   // States
   const [direction, setDirection] = useState<"lua_to_json" | "json_to_lua">("lua_to_json");
@@ -117,6 +137,8 @@ export function ConverterPage() {
   const [outputCode, setOutputCode] = useState("");
   const [convError, setConvError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  const [, setLintSuccess] = useState(true);
 
   // Resolve Dark Mode for Monaco
   const [isDark, setIsDark] = useState(false);
@@ -136,31 +158,92 @@ export function ConverterPage() {
     }
   }, [theme]);
 
-  // Live Conversion
+  // Live Conversion & Linting
   useEffect(() => {
     if (!ready || !wasm) return;
 
     if (!inputCode.trim()) {
       setOutputCode("");
       setConvError(null);
+      setDiagnostics([]);
+      setLintSuccess(true);
       return;
     }
 
     try {
       if (direction === "lua_to_json") {
-        const res = wasm.lua_to_json(inputCode);
-        setOutputCode(res);
-        setConvError(null);
+        // Run full custom linter
+        const lintResStr = wasm.lint(inputCode);
+        const lintRes: LintResult = JSON.parse(lintResStr);
+
+        setDiagnostics(lintRes.diagnostics);
+        setLintSuccess(lintRes.success);
+
+        if (lintRes.success && lintRes.data) {
+          setOutputCode(JSON.stringify(lintRes.data, null, 2));
+          setConvError(null);
+        } else {
+          setOutputCode("");
+          // Gather first error for basic panel fallback
+          const firstError = lintRes.diagnostics.find((d) => d.severity === "Error");
+          if (firstError) {
+            setConvError(
+              `[Line ${firstError.line}, Col ${firstError.character}] ${firstError.message}`,
+            );
+          } else {
+            setConvError("Linter detected configuration errors.");
+          }
+        }
       } else {
+        // json_to_lua conversion
         const res = wasm.json_to_lua(inputCode);
         setOutputCode(res);
         setConvError(null);
+        setDiagnostics([]);
+        setLintSuccess(true);
       }
     } catch (err) {
-      // In Rust WASM, errors returned as String are caught as JS exceptions
       setConvError(String(err));
+      setDiagnostics([]);
+      setLintSuccess(false);
     }
   }, [inputCode, direction, ready, wasm]);
+
+  // Live Editor Markers / Highlighting
+  useEffect(() => {
+    if (monaco && editorRef.current) {
+      const model = editorRef.current.getModel();
+      if (model) {
+        if (direction === "lua_to_json" && diagnostics.length > 0) {
+          const markers = diagnostics.map((d) => ({
+            startLineNumber: d.line,
+            startColumn: d.character,
+            endLineNumber: d.line,
+            endColumn: d.character + 8, // highlight standard field width or char boundaries
+            message: d.message,
+            severity: d.severity === "Error" ? 8 : 4, // 8 = Error, 4 = Warning in Monaco
+          }));
+          monaco.editor.setModelMarkers(model, "configir-linter", markers);
+        } else {
+          monaco.editor.setModelMarkers(model, "configir-linter", []);
+        }
+      }
+    }
+  }, [diagnostics, monaco, direction, inputCode]);
+
+  // Monaco Editor Mounting Callback
+  const handleEditorDidMount = (editor: any) => {
+    editorRef.current = editor;
+  };
+
+  // Cursor Focus Line Navigation
+  const focusOnLine = (line: number, character: number) => {
+    if (editorRef.current) {
+      editorRef.current.revealLineInCenter(line);
+      editorRef.current.setPosition({ lineNumber: line, column: character });
+      editorRef.current.focus();
+    }
+  };
 
   // Preload Helpers
   const loadTemplate = (dir: typeof direction) => {
@@ -318,6 +401,7 @@ export function ConverterPage() {
               theme={isDark ? "vs-dark" : "light"}
               value={inputCode}
               onChange={(val) => setInputCode(val || "")}
+              onMount={handleEditorDidMount}
               options={{
                 minimap: { enabled: false },
                 fontSize: 13,
@@ -344,7 +428,7 @@ export function ConverterPage() {
               height="100%"
               language={direction === "lua_to_json" ? "json" : "lua"}
               theme={isDark ? "vs-dark" : "light"}
-              value={convError ? "" : outputCode}
+              value={convError && direction === "lua_to_json" ? "" : outputCode}
               options={{
                 readOnly: true,
                 minimap: { enabled: false },
@@ -361,16 +445,100 @@ export function ConverterPage() {
         </div>
       </div>
 
-      {/* Visual Diagnostic Panel */}
-      {convError && (
+      {/* Visual Diagnostic Panel for Lua to JSON */}
+      {direction === "lua_to_json" && (
+        <div className="flex-shrink-0 mx-4 mb-4 border rounded-xl bg-card shadow-sm overflow-hidden border-border">
+          <div className="flex items-center justify-between border-b px-4 py-2 bg-muted/40">
+            <div className="flex items-center gap-2">
+              <Terminal className="h-4 w-4 text-primary" />
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Linter & Diagnostics
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {diagnostics.length === 0 ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                  <Check className="h-3 w-3" /> Clean Config
+                </span>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  {diagnostics.filter((d) => d.severity === "Error").length > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-destructive/10 text-destructive border border-destructive/20">
+                      {diagnostics.filter((d) => d.severity === "Error").length} Errors
+                    </span>
+                  )}
+                  {diagnostics.filter((d) => d.severity === "Warning").length > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                      {diagnostics.filter((d) => d.severity === "Warning").length} Warnings
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="p-3 max-h-[220px] overflow-y-auto bg-card/50">
+            {diagnostics.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-6 text-center text-muted-foreground">
+                <Sparkles className="h-8 w-8 text-emerald-500 mb-2 animate-pulse" />
+                <p className="text-sm font-medium">
+                  Your configuration matches all schema constraints perfectly!
+                </p>
+                <p className="text-xs text-muted-foreground/80 mt-1">
+                  Annotations are correctly bound to fields and types are fully matched.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {diagnostics.map((d, idx) => {
+                  const isError = d.severity === "Error";
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => focusOnLine(d.line, d.character)}
+                      className={`flex flex-col p-3 rounded-lg border text-left cursor-pointer transition-all hover:-translate-y-0.5 shadow-sm hover:shadow-md ${
+                        isError
+                          ? "bg-destructive/5 hover:bg-destructive/10 border-destructive/20 hover:border-destructive/40"
+                          : "bg-amber-500/5 hover:bg-amber-500/10 border-amber-500/20 hover:border-amber-500/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5 w-full">
+                        <span
+                          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            isError
+                              ? "bg-destructive/15 text-destructive"
+                              : "bg-amber-500/15 text-amber-500"
+                          }`}
+                        >
+                          {d.severity}
+                        </span>
+                        <span className="text-[11px] font-mono font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                          Line {d.line}:{d.character}
+                        </span>
+                      </div>
+                      <p className="text-xs font-mono font-medium leading-relaxed break-words text-foreground dark:text-gray-100 flex-1">
+                        {d.message}
+                      </p>
+                      <div className="text-[10px] text-muted-foreground/60 mt-1.5 w-full text-right font-semibold">
+                        Click to navigate in editor
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* JSON to Lua parsing error presentation */}
+      {direction === "json_to_lua" && convError && (
         <div className="flex-shrink-0 mx-4 mb-4 border border-destructive/30 rounded-xl bg-destructive/5 overflow-hidden">
           <div className="flex items-center gap-2 border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-destructive">
             <AlertTriangle className="h-4 w-4 shrink-0" />
-            <span className="text-xs font-bold uppercase tracking-wider">
-              Diagnostic Error Report
-            </span>
+            <span className="text-xs font-bold uppercase tracking-wider">JSON Parsing Error</span>
           </div>
-          <div className="p-4 max-h-[300px] overflow-auto">
+          <div className="p-4 max-h-[150px] overflow-auto">
             <pre className="text-[12px] leading-relaxed font-mono whitespace-pre text-destructive-foreground dark:text-red-300">
               {convError}
             </pre>

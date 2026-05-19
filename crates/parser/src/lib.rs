@@ -1,7 +1,12 @@
 pub mod generator;
+pub mod linter;
 pub mod models;
 pub mod trivia_parser;
 pub mod visitor;
+
+pub fn lint(source: &str) -> String {
+    linter::lint(source)
+}
 
 pub fn lua_to_json(source: &str) -> Result<String, String> {
     let ir = visitor::build_ir(source)?;
