@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-router": "^1.170.4",
     "@trek-cli/parser": "workspace:*",
     "lucide-react": "^0.487.0",

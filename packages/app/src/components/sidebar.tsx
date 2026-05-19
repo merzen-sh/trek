@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Monitor, Database, Terminal, Globe, Settings } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { Monitor, Database, Terminal, Globe, Settings, Cpu } from "lucide-react";
 import { useAppSetting } from "../lib/use-app-setting";
 import { cn } from "ui";
 import { SettingsDialog } from "./settings-dialog";
@@ -8,7 +9,7 @@ interface Resource {
   id: string;
   name: string;
   icon: typeof Monitor;
-  menus: { label: string }[];
+  menus: { label: string; to?: string }[];
 }
 
 const resources: Resource[] = [
@@ -16,25 +17,50 @@ const resources: Resource[] = [
     id: "server",
     name: "Display Server",
     icon: Monitor,
-    menus: [{ label: "Overview" }, { label: "Logs" }, { label: "Metrics" }, { label: "Settings" }],
+    menus: [
+      { label: "Overview", to: "/" },
+      { label: "Logs", to: "/" },
+      { label: "Metrics", to: "/" },
+      { label: "Settings", to: "/" },
+    ],
   },
   {
     id: "database",
     name: "Database",
     icon: Database,
-    menus: [{ label: "Tables" }, { label: "Queries" }, { label: "Backups" }, { label: "Config" }],
+    menus: [
+      { label: "Tables", to: "/" },
+      { label: "Queries", to: "/" },
+      { label: "Backups", to: "/" },
+      { label: "Config", to: "/" },
+    ],
   },
   {
     id: "terminal",
     name: "Terminal",
     icon: Terminal,
-    menus: [{ label: "Sessions" }, { label: "Commands" }, { label: "History" }],
+    menus: [
+      { label: "Sessions", to: "/" },
+      { label: "Commands", to: "/" },
+      { label: "History", to: "/" },
+    ],
   },
   {
     id: "globe",
     name: "Network",
     icon: Globe,
-    menus: [{ label: "Endpoints" }, { label: "Routes" }, { label: "Firewall" }, { label: "DNS" }],
+    menus: [
+      { label: "Endpoints", to: "/" },
+      { label: "Routes", to: "/" },
+      { label: "Firewall", to: "/" },
+      { label: "DNS", to: "/" },
+    ],
+  },
+  {
+    id: "parser",
+    name: "WASM Parser",
+    icon: Cpu,
+    menus: [{ label: "Converter", to: "/converter" }],
   },
 ];
 
@@ -96,12 +122,13 @@ function SidebarContent({
             </div>
             <nav className="space-y-0.5 p-2">
               {active.menus.map((m) => (
-                <button
+                <Link
                   key={m.label}
-                  className="flex w-full items-center rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  to={m.to || "/"}
+                  className="flex w-full items-center rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground [&.active]:bg-accent [&.active]:text-accent-foreground font-medium transition-colors"
                 >
                   {m.label}
-                </button>
+                </Link>
               ))}
             </nav>
           </div>

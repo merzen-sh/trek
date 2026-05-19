@@ -49,3 +49,6 @@ build-wasm:
 
 generate-schema:
 	cargo run -p parser --example generate_schema > schema.json
+
+next-test:
+	cargo-nextest nextest run --all --all-targets
