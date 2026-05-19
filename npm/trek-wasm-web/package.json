@@ -1,19 +1,19 @@
 {
-    "name": "@trek-cli/parser",
-    "version": "0.1.0",
-    "main": "parser_wasm.js",
-    "types": "parser_wasm.d.ts",
-    "exports": {
-        ".": {
-            "types": "./parser_wasm.d.ts",
-            "import": "./parser_wasm.js",
-            "default": "./parser_wasm.js"
-        },
-        "./*.wasm": "./*.wasm"
+  "name": "@trek-cli/parser",
+  "version": "0.1.0",
+  "files": [
+    "*.d.ts",
+    "*.js",
+    "*.wasm"
+  ],
+  "main": "parser_wasm.js",
+  "types": "parser_wasm.d.ts",
+  "exports": {
+    ".": {
+      "types": "./parser_wasm.d.ts",
+      "import": "./parser_wasm.js",
+      "default": "./parser_wasm.js"
     },
-    "files": [
-        "*.d.ts",
-        "*.js",
-        "*.wasm"
-    ]
+    "./*.wasm": "./*.wasm"
+  }
 }
