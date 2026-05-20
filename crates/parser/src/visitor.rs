@@ -236,9 +236,12 @@ fn expr_line(expr: &Expression) -> usize {
         Expression::String(token) => token.start_position().line(),
         Expression::Number(token) => token.start_position().line(),
         Expression::Symbol(token) => token.start_position().line(),
-        Expression::TableConstructor(tc) => {
-            tc.fields().iter().next().map(|f| field_line(f)).unwrap_or(0)
-        }
+        Expression::TableConstructor(tc) => tc
+            .fields()
+            .iter()
+            .next()
+            .map(|f| field_line(f))
+            .unwrap_or(0),
         _ => 0,
     }
 }
@@ -249,15 +252,13 @@ fn check_lua_key_ok(key: &str, field: &Field) -> Result<(), String> {
         return Err(format!("line {}: Empty string used as table key", line));
     }
     if key.contains('\0') {
-        return Err(format!(
-            "line {}: Key contains null byte: '{}'",
-            line, key
-        ));
+        return Err(format!("line {}: Key contains null byte: '{}'", line, key));
     }
     if key.len() > 200 {
         return Err(format!(
             "line {}: Key exceeds maximum length (200 chars): '{}'",
-            line, &key[..40]
+            line,
+            &key[..40]
         ));
     }
     Ok(())
@@ -313,7 +314,10 @@ fn visit_expression(expr: &Expression, meta: FieldMetadata) -> Result<ConfigNode
                     }),
                     meta,
                 )),
-                "nil" => Ok(node_with_meta(ConfigNode::Nil(NilValue { metadata: None }), meta)),
+                "nil" => Ok(node_with_meta(
+                    ConfigNode::Nil(NilValue { metadata: None }),
+                    meta,
+                )),
                 _ => Ok(node_with_meta(
                     ConfigNode::Expression(ExpressionValue {
                         value: s,

@@ -1,4 +1,5 @@
 mod health;
+mod proxy;
 mod router;
 
 use hyper::Request;
@@ -23,6 +24,10 @@ impl Server {
         let app = router::create();
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
         let listener = TcpListener::bind(addr).await?;
+
+        #[cfg(all(not(feature = "swagger"), debug_assertions))]
+        tracing::warn!("!!! swagger disabled. Enable swagger feature for debug builds");
+
         tracing::info!("listening on {addr}");
 
         loop {
@@ -45,9 +50,6 @@ impl Server {
 }
 
 pub fn run_server(port: u16) -> anyhow::Result<()> {
-    #[cfg(all(not(feature = "swagger"), debug_assertions))]
-    tracing::warn!("!!! swagger disabled. Enable swagger feature for debug builds");
-
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()

@@ -17,6 +17,9 @@ utoipa = { workspace = true, optional = true }
 utoipa-swagger-ui = { workspace = true, optional = true }
 bytes.workspace = true
 http-body-util.workspace = true
+serde = { workspace = true, features = ["derive"] }
+toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
+inquire = { version = "0.7", default-features = false, features = ["console"] }
 
 [features]
 swagger = ["dep:utoipa", "dep:utoipa-swagger-ui"]
