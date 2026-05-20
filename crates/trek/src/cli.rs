@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::server::run_server;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -23,6 +24,9 @@ enum Commands {
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    let mut config = Config::load()?;
+    config.ensure_workspace_dir()?;
 
     match &cli.command {
         Some(Commands::Serve { port }) => {

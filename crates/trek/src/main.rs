@@ -1,4 +1,5 @@
 mod cli;
+mod config;
 mod server;
 
 fn main() -> anyhow::Result<()> {
