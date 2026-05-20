@@ -6,8 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
 
 jobs:
   next-test:
@@ -18,9 +25,12 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           rust-toolchain: 1.95.0
+          cache: false
+
+      - uses: swatinem/rust-cache@v2
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest
+          tool: cargo-nextest@0.9.90
 
-      - run: cargo nextest run --all --all-targets
+      - run: cargo nextest run --all --all-targets --no-fail-fast --locked
