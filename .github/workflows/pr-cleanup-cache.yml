@@ -1,0 +1,26 @@
+name: Cleanup Branch Cache
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write 
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Cache for Closed Branch
+        run: |
+          gh extension install actions/gh-actions-cache
+          
+          # Extract the ref of the branch that was just closed
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          
+          echo "Deleting cache for branch: $BRANCH"
+          
+          # Delete all caches associated with this specific branch
+          gh actions-cache delete "refs/heads/$BRANCH" --confirm || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
