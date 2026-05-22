@@ -1,305 +1,322 @@
-use crate::models::*;
-use full_moon::ast::Expression;
-use full_moon::tokenizer::{Token, TokenType};
+use full_moon::{
+    ast::{Expression, Field, Stmt, Var},
+    parse,
+    tokenizer::{TokenReference, TokenType},
+};
 
-#[derive(Debug, Clone)]
-pub enum Annotation {
-    KeyValue { key: String, value: String },
-    Block { key: String, raw_table: String },
+use crate::models::{ArgDef, CfxFunctionMeta, ColumnDef, ColumnType, TableSchema};
+use indexmap::IndexMap;
+
+// ---------------------------------------------------------------------------
+// Public annotation bag
+// ---------------------------------------------------------------------------
+
+/// All annotations collected from a single token's leading trivia.
+#[derive(Default)]
+pub struct Annotations {
+    pub description:  Vec<String>,
+    pub enum_options: Option<Vec<String>>,
+    pub range:        Option<Vec<String>>,
+    pub table_schema: Option<TableSchema>,
+    pub cfx_function: Option<CfxFunctionMeta>,
 }
 
-pub fn parse_trivia_token(token: &Token) -> Option<Annotation> {
-    match token.token_type() {
-        TokenType::SingleLineComment { comment } => {
-            let text = comment.to_string();
-            if let Some(rest) = text.strip_prefix('!') {
-                let rest = rest.trim();
-                if let Some(eq_pos) = rest.find('=') {
-                    let key = rest[..eq_pos].trim().to_string();
-                    let value = rest[eq_pos + 1..].trim().to_string();
-                    return Some(Annotation::KeyValue { key, value });
+impl Annotations {
+    /// Move `description` out; returns `None` when empty.
+    #[inline]
+    pub fn take_description(&mut self) -> Option<Vec<String>> {
+        if self.description.is_empty() { None } else { Some(std::mem::take(&mut self.description)) }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
+/// Collect every annotation from the leading trivia of `token_ref`.
+///
+/// | Syntax                    | Populates            |
+/// |---------------------------|----------------------|
+/// | `--! text`                | `description`        |
+/// | `--@ENUM = { "a", "b" }`  | `enum_options`       |
+/// | `--@RANGE = { 0, 100 }`   | `range`              |
+/// | `--[[@TABLE … --]]`       | `table_schema`       |
+/// | `--[[@CFX_FUNCTION … --]]`| `cfx_function`       |
+/// | `--[[ !text … --]]`       | `description`        |
+/// | `--[[ @ENUM … --]]`       | `enum_options`       |
+/// | `--[[ @RANGE … --]]`      | `range`              |
+pub fn parse_annotations(token_ref: &TokenReference) -> Annotations {
+    let mut ann = Annotations::default();
+    let trivia: Vec<_> = token_ref.leading_trivia().collect();
+
+    for token in trivia.iter().rev() {
+        match token.token_type() {
+            TokenType::SingleLineComment { comment } => {
+                if let Some(text) = comment.strip_prefix('!') {
+                    ann.description.push(text.trim().to_string());
+                } else if let Some(text) = comment.strip_prefix('@') {
+                    if text.starts_with("ENUM") {
+                        ann.enum_options = parse_table_values(text);
+                    } else if text.starts_with("RANGE") {
+                        ann.range = parse_table_values(text);
+                    } else if text.starts_with("CFX_FUNCTION") {
+                        ann.cfx_function = parse_cfx_function(text);
+                    }
                 }
             }
-            None
-        }
-        TokenType::MultiLineComment { comment, .. } => {
-            let text = comment.to_string();
-            let text = text.trim();
-            if let Some(eq_pos) = text.find('=') {
-                let key = text[..eq_pos].trim().to_string();
-                let raw_table = text[eq_pos + 1..].trim().to_string();
-                return Some(Annotation::Block { key, raw_table });
+            TokenType::MultiLineComment { comment, .. } => {
+                // full_moon emits `--[[` content as MultiLineComment.
+                // Do NOT break here — the `--]]` closer appears as a separate
+                // token *before* the opener when iterating in reverse, and we
+                // must keep scanning past it to find preceding `--!` lines.
+                let body = comment.trim_start();
+                // Match @table / @TABLE / @CFX_FUNCTION (case-insensitive)
+                if body.to_ascii_uppercase().starts_with("@TABLE") {
+                    ann.table_schema = parse_table_schema(&body[1..]);
+                } else if body.to_ascii_uppercase().starts_with("@CFX_FUNCTION") {
+                    ann.cfx_function = parse_cfx_function(&body[1..]);
+                } else {
+                    // Parse each line for:
+                    //   !text    → description
+                    //   @ENUM…   → enum options
+                    //   @RANGE…  → range constraint
+                    let mut block_descs = Vec::new();
+                    for line in body.lines() {
+                        let line = line.trim();
+                        if let Some(text) = line.strip_prefix('!') {
+                            block_descs.push(text.trim().to_string());
+                        } else if let Some(text) = line.strip_prefix('@') {
+                            if text.starts_with("ENUM") {
+                                ann.enum_options = parse_table_values(text);
+                            } else if text.starts_with("RANGE") {
+                                ann.range = parse_table_values(text);
+                            }
+                        }
+                    }
+                    // Lines within the block are in forward order, but the
+                    // whole token is visited during reverse trivia iteration.
+                    // Push in reverse so the final .reverse() restores order.
+                    for d in block_descs.into_iter().rev() {
+                        ann.description.push(d);
+                    }
+                }
             }
-            None
+            TokenType::Whitespace { .. } => continue,
+            // Only truly foreign tokens (identifiers, operators, etc.)
+            // terminate the annotation window.
+            _ => break,
         }
-        _ => None,
     }
+
+    ann.description.reverse();
+    ann
 }
 
-pub fn annotation_to_metadata(ann: &Annotation) -> Result<FieldMetadata, String> {
-    match ann {
-        Annotation::KeyValue { key, value } => parse_key_value_meta(key, value),
-        Annotation::Block { key, raw_table } => parse_block_meta(key, raw_table),
-    }
-}
+// ---------------------------------------------------------------------------
+// `@TABLE` schema parser
+// ---------------------------------------------------------------------------
 
-fn parse_key_value_meta(key: &str, value: &str) -> Result<FieldMetadata, String> {
-    let mut meta = FieldMetadata::default();
-    match key {
-        "ENUM" => {
-            let options = parse_lua_string_array(value)?;
-            meta.enum_options = Some(options);
-        }
-        "MAP" => {
-            let val = value.trim().to_lowercase();
-            meta.map = Some(val == "true");
-        }
-        "RANGE" => {
-            let range = parse_lua_range(value)?;
-            meta.range = Some(range);
-        }
-        _ => {}
-    }
-    Ok(meta)
-}
+fn parse_table_schema(body: &str) -> Option<TableSchema> {
+    // `--[[@TABLE … --]]` leaves a trailing "--" in `body`; strip it.
+    let body = body.trim_end_matches('-').trim_end();
+    let src = format!("local {body}");
+    let ast = parse(src.trim()).ok()?;
+    let table = first_table_constructor(&ast)?;
 
-fn parse_block_meta(key: &str, raw_table: &str) -> Result<FieldMetadata, String> {
-    let mut meta = FieldMetadata::default();
-    match key {
-        "TABLE" | "ITEMS" => {
-            let schema = parse_table_schema(raw_table)?;
-            meta.table_schema = Some(schema);
-        }
-        "CFX_FUNCTION" => {
-            let info = parse_function_info(raw_table)?;
-            meta.function_info = Some(info);
-        }
-        _ => {}
-    }
-    Ok(meta)
-}
-
-fn parse_lua_string_array(text: &str) -> Result<Vec<String>, String> {
-    let wrapped = format!("local _ = {}", text);
-    let ast = parse_virtual(&wrapped)?;
-    let table = extract_table_from_block(&ast)?;
-    let mut result = Vec::new();
+    let mut schema = TableSchema::default();
     for field in table.fields().iter() {
-        if let Ok(val) = field_string_value(field) {
-            result.push(val);
-        }
-    }
-    Ok(result)
-}
-
-fn parse_lua_range(text: &str) -> Result<RangeValue, String> {
-    let wrapped = format!("local _ = {}", text);
-    let ast = parse_virtual(&wrapped)?;
-    let table = extract_table_from_block(&ast)?;
-    let mut min = 0.0;
-    let mut max = 0.0;
-    for field in table.fields().iter() {
-        let name = field_key_name(field)?;
-        let num = field_number_value(field)?;
-        match name.as_str() {
-            "min" => min = num,
-            "max" => max = num,
+        let Field::NameKey { key, value, .. } = field else { continue };
+        match key.token().to_string().as_str() {
+            "allow_add"    => schema.allow_add    = is_true(value),
+            "allow_delete" => schema.allow_delete = is_true(value),
+            "allow_edit"   => schema.allow_edit   = is_true(value),
+            "schema" | "schemas" => schema.columns = parse_columns(value),
             _ => {}
         }
     }
-    Ok(RangeValue { min, max })
+    Some(schema)
 }
 
-fn parse_table_schema(raw_table: &str) -> Result<TableSchema, String> {
-    let wrapped = format!("local _ = {}", raw_table);
-    let ast = parse_virtual(&wrapped)?;
-    let table = extract_table_from_block(&ast)?;
-    let mut layout = String::from("static");
-    let mut schema = Vec::new();
-    for field in table.fields().iter() {
-        let name = field_key_name(field)?;
-        match name.as_str() {
-            "layout" => {
-                if let Ok(val) = field_string_value(field) {
-                    layout = val;
-                }
-            }
-            "schema" => {
-                let tc = field_table_value(field)?;
-                for row in tc.fields().iter() {
-                    let col = parse_column_schema(row)?;
-                    schema.push(col);
-                }
-            }
+fn parse_columns(expr: &Expression) -> Vec<ColumnDef> {
+    let Expression::TableConstructor(outer) = expr else { return Vec::new() };
+    outer
+        .fields()
+        .iter()
+        .filter_map(|f| {
+            let Field::NoKey(inner_expr) = f else { return None };
+            let Expression::TableConstructor(inner) = inner_expr else { return None };
+            parse_column_def(inner)
+        })
+        .collect()
+}
+
+fn parse_column_def(table: &full_moon::ast::TableConstructor) -> Option<ColumnDef> {
+    let mut field    = None::<String>;
+    let mut col_type = None::<String>;
+    let mut label    = None::<String>;
+    let mut values   = Vec::<String>::new();
+
+    for f in table.fields().iter() {
+        let Field::NameKey { key, value, .. } = f else { continue };
+        match key.token().to_string().as_str() {
+            "field"           => field    = Some(extract_string_value(value)),
+            "type"            => col_type = Some(extract_string_value(value)),
+            "label"           => label    = Some(extract_string_value(value)), // tolerate common typo
+            "values"          => values   = collect_string_list(value),
             _ => {}
         }
     }
-    Ok(TableSchema { layout, schema })
-}
 
-fn parse_column_schema(field: &full_moon::ast::Field) -> Result<ColumnSchema, String> {
-    let tc = match field {
-        full_moon::ast::Field::NoKey(Expression::TableConstructor(tc))
-        | full_moon::ast::Field::ExpressionKey {
-            value: Expression::TableConstructor(tc),
-            ..
-        }
-        | full_moon::ast::Field::NameKey {
-            value: Expression::TableConstructor(tc),
-            ..
-        } => tc,
-        _ => return Err("expected table constructor for column".to_string()),
-    };
-    let mut name = String::new();
-    let mut column_type = String::new();
-    let mut is_key = None;
-    let mut label = None;
-    let mut description = None;
-    for col_field in tc.fields().iter() {
-        let field_name = field_key_name(col_field)?;
-        match field_name.as_str() {
-            "name" => name = field_string_value(col_field)?,
-            "type" => column_type = field_string_value(col_field)?,
-            "is_key" => {
-                if let Some(b) = field_bool_value(col_field) {
-                    is_key = Some(b);
-                }
-            }
-            "label" => {
-                if let Ok(v) = field_string_value(col_field) {
-                    label = Some(v);
-                }
-            }
-            "description" => {
-                if let Ok(v) = field_string_value(col_field) {
-                    description = Some(v);
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(ColumnSchema {
-        name,
-        column_type,
-        is_key,
-        label,
-        description,
+    Some(ColumnDef {
+        field:    field?,
+        col_type: ColumnType::from(col_type.as_deref().unwrap_or("")),
+        label:    label.unwrap_or_default(),
+        values,
     })
 }
 
-fn parse_function_info(raw_table: &str) -> Result<FunctionInfo, String> {
-    let wrapped = format!("local _ = {}", raw_table);
-    let ast = parse_virtual(&wrapped)?;
-    let table = extract_table_from_block(&ast)?;
-    let mut resource_name = String::new();
-    let mut function_name = String::new();
-    for field in table.fields().iter() {
-        let name = field_key_name(field)?;
-        match name.as_str() {
-            "resource_name" => resource_name = field_string_value(field)?,
-            "function_name" => function_name = field_string_value(field)?,
-            _ => {}
-        }
-    }
-    Ok(FunctionInfo {
-        resource_name,
-        function_name,
-    })
+/// Meta block (`KEY = value` in a plain `--[[ … ]]` comment)
+pub fn parse_lua_key_values(source: &str) -> IndexMap<String, serde_json::Value> {
+    let Ok(ast) = parse(source) else { return IndexMap::new() };
+
+    ast.nodes()
+        .stmts()
+        .filter_map(|stmt| {
+            let Stmt::Assignment(assign) = stmt else { return None };
+            Some(
+                assign
+                    .variables()
+                    .iter()
+                    .zip(assign.expressions().iter())
+                    .filter_map(|(var, expr)| {
+                        let Var::Name(token) = var else { return None };
+                        Some((
+                            token.token().to_string(),
+                            serde_json::Value::String(extract_string_value(expr)),
+                        ))
+                    }),
+            )
+        })
+        .flatten()
+        .collect()
 }
 
-fn parse_virtual(code: &str) -> Result<full_moon::ast::Ast, String> {
-    full_moon::parse(code).map_err(|errors| {
-        let msgs: Vec<String> = errors
-            .iter()
-            .map(|e| e.error_message().to_string())
-            .collect();
-        format!("parse error: {}", msgs.join("; "))
-    })
-}
-
-fn extract_table_from_block(
-    ast: &full_moon::ast::Ast,
-) -> Result<&full_moon::ast::TableConstructor, String> {
-    for stmt in ast.nodes().stmts() {
-        if let full_moon::ast::Stmt::LocalAssignment(la) = stmt {
-            for expr in la.expressions().iter() {
-                if let Expression::TableConstructor(tc) = expr {
-                    return Ok(tc);
-                }
-            }
-        }
-    }
-    Err("expected local assignment with table constructor".to_string())
-}
-
-fn field_key_name(field: &full_moon::ast::Field) -> Result<String, String> {
-    match field {
-        full_moon::ast::Field::NameKey { key, .. } => Ok(key.token().to_string()),
-        full_moon::ast::Field::ExpressionKey { key, .. } => {
-            if let Expression::String(token) = key {
-                if let TokenType::StringLiteral { literal, .. } = token.token().token_type() {
-                    return Ok(literal.to_string());
-                }
-            }
-            Err("unsupported expression key".to_string())
-        }
-        full_moon::ast::Field::NoKey(_) => Err("field has no key".to_string()),
-        _ => Err("unknown field type".to_string()),
-    }
-}
-
-fn field_number_value(field: &full_moon::ast::Field) -> Result<f64, String> {
-    let expr = field_value_expr(field)?;
-    match expr {
-        Expression::Number(token) => {
-            let s = token.to_string();
-            s.parse::<f64>().map_err(|e| format!("parse number: {e}"))
-        }
-        _ => Err("expected number".to_string()),
-    }
-}
-
-fn field_string_value(field: &full_moon::ast::Field) -> Result<String, String> {
-    let expr = field_value_expr(field)?;
+/// Extract scalar string representation from a Lua expression leaf.
+#[inline]
+pub fn extract_string_value(expr: &Expression) -> String {
     match expr {
         Expression::String(token) => {
             if let TokenType::StringLiteral { literal, .. } = token.token().token_type() {
-                Ok(literal.to_string())
+                literal.to_string()
             } else {
-                Ok(token.to_string().trim_matches('"').to_string())
+                token.to_string()
             }
         }
-        _ => Err("expected string".to_string()),
+        Expression::Number(token) => {
+            if let TokenType::Number { text } = token.token().token_type() {
+                text.to_string()
+            } else {
+                token.to_string()
+            }
+        }
+        Expression::Symbol(token) => token.token().to_string(),
+        other => other.to_string(),
     }
 }
 
-fn field_bool_value(field: &full_moon::ast::Field) -> Option<bool> {
-    let expr = field_value_expr(field).ok()?;
-    match expr {
-        Expression::Symbol(token) => match token.to_string().as_str() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None,
-        },
-        _ => None,
-    }
+fn parse_table_values(ann: &str) -> Option<Vec<String>> {
+    let src = format!("local {ann}");
+    let ast = parse(src.trim()).ok()?;
+    ast.nodes().stmts().find_map(|stmt| {
+        let Stmt::LocalAssignment(local) = stmt else { return None };
+        local.expressions().iter().find_map(|expr| {
+            let Expression::TableConstructor(table) = expr else { return None };
+            let v: Vec<String> = table
+                .fields()
+                .iter()
+                .filter_map(|f| if let Field::NoKey(e) = f { Some(extract_string_value(e)) } else { None })
+                .collect();
+            if v.is_empty() { None } else { Some(v) }
+        })
+    })
 }
 
-fn field_table_value(
-    field: &full_moon::ast::Field,
-) -> Result<&full_moon::ast::TableConstructor, String> {
-    let expr = field_value_expr(field)?;
-    match expr {
-        Expression::TableConstructor(tc) => Ok(tc),
-        _ => Err("expected table constructor".to_string()),
-    }
+fn collect_string_list(expr: &Expression) -> Vec<String> {
+    let Expression::TableConstructor(table) = expr else { return Vec::new() };
+    table
+        .fields()
+        .iter()
+        .filter_map(|f| if let Field::NoKey(e) = f { Some(extract_string_value(e)) } else { None })
+        .collect()
 }
 
-fn field_value_expr(field: &full_moon::ast::Field) -> Result<&Expression, String> {
-    match field {
-        full_moon::ast::Field::NameKey { value, .. }
-        | full_moon::ast::Field::ExpressionKey { value, .. } => Ok(value),
-        full_moon::ast::Field::NoKey(expr) => Ok(expr),
-        _ => Err("unsupported field type".to_string()),
+#[inline]
+fn is_true(expr: &Expression) -> bool {
+    matches!(expr, Expression::Symbol(t) if t.token().to_string() == "true")
+}
+
+// ---------------------------------------------------------------------------
+// `@CFX_FUNCTION` parser
+// ---------------------------------------------------------------------------
+
+fn parse_cfx_function(ann: &str) -> Option<CfxFunctionMeta> {
+    let src = format!("local {ann}");
+    let ast = parse(src.trim()).ok()?;
+    let table = first_table_constructor(&ast)?;
+
+    let mut meta = CfxFunctionMeta::default();
+    for field in table.fields().iter() {
+        let Field::NameKey { key, value, .. } = field else { continue };
+        if key.token().to_string() == "args_schema" {
+            meta.args_schema = parse_arg_defs(value);
+        }
     }
+    Some(meta)
+}
+
+fn parse_arg_defs(expr: &Expression) -> Vec<ArgDef> {
+    let Expression::TableConstructor(outer) = expr else { return Vec::new() };
+    outer
+        .fields()
+        .iter()
+        .filter_map(|f| {
+            let Field::NoKey(inner_expr) = f else { return None };
+            let Expression::TableConstructor(inner) = inner_expr else { return None };
+            parse_arg_def(inner)
+        })
+        .collect()
+}
+
+fn parse_arg_def(table: &full_moon::ast::TableConstructor) -> Option<ArgDef> {
+    let mut name     = None::<String>;
+    let mut arg_type = None::<String>;
+    let mut label    = None::<String>;
+    let mut required = None::<bool>;
+
+    for f in table.fields().iter() {
+        let Field::NameKey { key, value, .. } = f else { continue };
+        match key.token().to_string().as_str() {
+            "name"     => name     = Some(extract_string_value(value)),
+            "type"     => arg_type = Some(extract_string_value(value)),
+            "label"    => label    = Some(extract_string_value(value)),
+            "required" => required = Some(is_true(value)),
+            _ => {}
+        }
+    }
+
+    Some(ArgDef {
+        name: name?,
+        arg_type: ColumnType::from(arg_type.as_deref().unwrap_or("")),
+        label: label.unwrap_or_default(),
+        required: required.unwrap_or(false),
+    })
+}
+
+fn first_table_constructor(ast: &full_moon::ast::Ast) -> Option<&full_moon::ast::TableConstructor> {
+    ast.nodes().stmts().find_map(|stmt| {
+        let Stmt::LocalAssignment(local) = stmt else { return None };
+        local.expressions().iter().find_map(|expr| {
+            if let Expression::TableConstructor(t) = expr { Some(t) } else { None }
+        })
+    })
 }

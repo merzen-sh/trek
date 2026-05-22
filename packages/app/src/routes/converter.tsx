@@ -17,92 +17,130 @@ import {
   Terminal,
 } from "lucide-react";
 
-const DEFAULT_LUA_TEMPLATE = `--// Top Level Config
-config = {
-    --// Language setting
-    --!ENUM = { "jp", "en" }
-    locale = "en",
-
-    --// Enable shop
-    enable_shop = true,
-
-    --// Shop list
-    shop = {
-        --// Blip position
-        --!MAP = true
-        blip_pos = vector2(1.0, 2.0),
-
-        --// Shop position
-        --!MAP = true
-        pos = vector3(10.0, 95.0, 20.0),
-
-        --// Shop price
-        price = 10,
-
-        --// enum
-        --!ENUM = { "a", "b", "c" }
-        test_enum = "a",
-    },
-
-    --// Table example
-    --[[TABLE = {
-        layout = "items",
+const DEFAULT_LUA_TEMPLATE = `config = {
+    --!Server configuration root
+    --[[@TABLE = {
+        allow_edit = false,
         schema = {
-            { name = "key", type = "string", is_key = true, label = "key" },
-            { name = "label", type = "string", label = "label" },
-            { name = "price", type = "number", label = "price" },
-            { name = "type", type = "string", label = "type" }
+            { name = "key", type = "string", label = "Config key" },
+            { name = "value", type = "string", label = "Config value" },
         }
     }]]
-    items = {
-        water_bottle = {
-            key = "water_bottle",
-            label = "Drinking Water",
-            price = 5,
-            type = "food",
+    server = {
+        --!Basic server info
+        identifier = "srv_01",
+        --!Server region
+        --@ENUM = { "us-east", "eu-west", "ap-southeast" }
+        region = "us-east",
+        --!Max player count
+        --@RANGE = { min = 1, max = 256 }
+        max_players = 64,
+        --!Features enabled
+        features = {
+            --!Anti-cheat system
+            anti_cheat = true,
+            --!Voice chat
+            voice = false,
         },
+    },
+
+    --!Economy system
+    --[[@TABLE = {
+        allow_add = true,
+        allow_delete = true,
+        schema = {
+            { name = "id", type = "key", label = "Item ID" },
+            { name = "name", type = "string", label = "Item name" },
+            { name = "category", type = "enum", label = "Category", values = { "weapon", "food", "vehicle", "clothing" } },
+            { name = "price", type = "number", label = "Price" },
+        }
+    }]]
+    economy = {
+        --!Shop items
+        items = {
+            --!Weapon category
+            pistol = {
+                name = "Pistol",
+                category = "weapon",
+                price = 500,
+            },
+        },
+    },
+
+    --!Discord integration
+    discord = {
+        --!Bot token webhook
+        --[[@CFX_FUNCTION = {
+              args_schema = {
+                { name = "message", type = "string", label = "Message content", required = true },
+                { name = "channel_id", type = "string", label = "Target channel", required = true },
+              }
+          }]]
+        send_message = function(msg, channel)
+            exports.discord:send(channel, msg)
+        end,
+    },
+
+    --!Player defaults
+    player_defaults = {
+        --!Spawn location
+        --@MAP = true
+        spawn = vector3(-150.0, 50.0, 28.0),
+        --!Starting money
+        --@RANGE = { min = 0, max = 100000 }
+        start_money = 1000,
     },
 }`;
 
 const DEFAULT_JSON_TEMPLATE = `{
-  "locale": {
-    "type": "enum",
-    "value": "en",
-    "metadata": {
-      "description": "Language setting",
-      "enum_options": [
-        "jp",
-        "en"
-      ]
-    }
-  },
-  "enable_shop": {
-    "type": "boolean",
-    "value": true,
-    "metadata": {
-      "description": "Enable shop"
-    }
-  },
-  "shop": {
-    "type": "table",
-    "fields": {
-      "blip_pos": {
-        "type": "vector2",
-        "x": 1.0,
-        "y": 2.0,
-        "metadata": {
-          "description": "Blip position",
-          "map": true
+  "fields": {
+    "server": {
+      "type": "table",
+      "rows": {
+        "identifier": {
+          "type": "string",
+          "value": "srv_01",
+          "metadata": {
+            "description": [
+              "Basic server info"
+            ]
+          }
+        },
+        "region": {
+          "type": "enum",
+          "value": "us-east",
+          "metadata": {
+            "description": [
+              "Server region"
+            ],
+            "options": [
+              "us-east",
+              "eu-west",
+              "ap-southeast"
+            ]
+          }
         }
       },
-      "pos": {
-        "type": "vector3",
-        "x": 10.0,
-        "y": 95.0,
-        "z": 20.0,
-        "metadata": {
-          "description": "Shop position",
-          "map": true
+      "metadata": {
+        "description": [
+          "Server configuration root"
+        ],
+        "schema": {
+          "allow_add": false,
+          "allow_delete": false,
+          "allow_edit": false,
+          "columns": [
+            {
+              "field": "key",
+              "type": "string",
+              "label": "Config key"
+            },
+            {
+              "field": "value",
+              "type": "string",
+              "label": "Config value"
+            }
+          ]
         }
       }
     }
@@ -115,12 +153,6 @@ interface Diagnostic {
   character: number;
   message: string;
   source: string;
-}
-
-interface LintResult {
-  success: boolean;
-  diagnostics: Diagnostic[];
-  data?: any;
 }
 
 export function ConverterPage() {
@@ -172,28 +204,11 @@ export function ConverterPage() {
 
     try {
       if (direction === "lua_to_json") {
-        // Run full custom linter
-        const lintResStr = wasm.lint(inputCode);
-        const lintRes: LintResult = JSON.parse(lintResStr);
-
-        setDiagnostics(lintRes.diagnostics);
-        setLintSuccess(lintRes.success);
-
-        if (lintRes.success && lintRes.data) {
-          setOutputCode(JSON.stringify(lintRes.data, null, 2));
-          setConvError(null);
-        } else {
-          setOutputCode("");
-          // Gather first error for basic panel fallback
-          const firstError = lintRes.diagnostics.find((d) => d.severity === "Error");
-          if (firstError) {
-            setConvError(
-              `[Line ${firstError.line}, Col ${firstError.character}] ${firstError.message}`,
-            );
-          } else {
-            setConvError("Linter detected configuration errors.");
-          }
-        }
+        const res = wasm.lua_to_json(inputCode);
+        setOutputCode(res);
+        setConvError(null);
+        setDiagnostics([]);
+        setLintSuccess(true);
       } else {
         // json_to_lua conversion
         const res = wasm.json_to_lua(inputCode);
@@ -478,7 +493,19 @@ export function ConverterPage() {
           </div>
 
           <div className="p-3 max-h-[220px] overflow-y-auto bg-card/50">
-            {diagnostics.length === 0 ? (
+            {convError ? (
+              <div className="flex flex-col p-4 rounded-lg border bg-destructive/5 border-destructive/20 shadow-sm">
+                <div className="flex items-center gap-2 mb-2 text-destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider">
+                    Runtime Conversion Error
+                  </span>
+                </div>
+                <pre className="text-xs font-mono font-medium leading-relaxed break-words text-destructive-foreground dark:text-red-300 whitespace-pre-wrap">
+                  {convError}
+                </pre>
+              </div>
+            ) : diagnostics.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-6 text-center text-muted-foreground">
                 <Sparkles className="h-8 w-8 text-emerald-500 mb-2 animate-pulse" />
                 <p className="text-sm font-medium">

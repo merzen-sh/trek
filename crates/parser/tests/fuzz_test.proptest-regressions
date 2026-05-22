@@ -1,0 +1,13 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc efc337b13194b3407bdf0e3b431a368dca116a461c8bc7d10e5be434fe899416 # shrinks to doc = ConfigDoc { meta: None, fields: {"a": Number(ScalarNode { value: "0", metadata: Some(ScalarMeta { description: None, range: None }) })} }
+cc 505de2458fa295bdca1924d477683a134494474d11cf140f74ff38d46a9f8a8a # shrinks to mut doc = ConfigDoc { meta: None, fields: {"a": Table(TableNode { rows: {"a": Table(TableNode { rows: {"a": CfxFunction(CfxFunctionNode { metadata: CfxFunctionMeta { description: None, args_schema: [ArgDef { name: "a", arg_type: String, label: "\\", required: false }] } })}, metadata: None })}, metadata: None })} }
+cc 819bf8b7e8cf46934c528b7bea10ba5898290e5e098f372b8a344fd766a88b53 # shrinks to mut doc = ConfigDoc { meta: None, fields: {"a": Vector3(Vector3Node { value: Vector3Value { x: 0.0, y: 0.0, z: 0.0 }, metadata: Some(ScalarMeta { description: Some([" "]), range: None }) })} }
+cc b522d37255b5a59da1f6f91098df69b512e33d5f3afad1925c4ee05dfbbbf817 # shrinks to mut doc = ConfigDoc { meta: None, fields: {"_": Table(TableNode { rows: {"a": Vector3(Vector3Node { value: Vector3Value { x: 0.0, y: 951.4008805770671, z: 0.0 }, metadata: None })}, metadata: None })} }
+cc fb04b3679105ad62a8f10d348abb36e1a6e9ef7187c65ffba170d4d4b9a76195 # shrinks to mut doc = ConfigDoc { meta: None, fields: {"a": Number(ScalarNode { value: "-0.0", metadata: None })} }
+cc dc854bddb5a8481c61099a3acd6d50b3f06737d0a632b78ca885637d98563db6 # shrinks to mut doc = ConfigDoc { meta: None, fields: {"a": Table(TableNode { rows: {"if": String(ScalarNode { value: "", metadata: None })}, metadata: None })} }
+cc 12943f1a7bcefda346a7fc4c0341b8597553affd31be81554489ba4c810b3b88 # shrinks to mut doc = ConfigDoc { meta: Some({"in": String("")}), fields: {} }

@@ -11,11 +11,8 @@ pub fn lua_to_json(source: &str) -> Result<String, String> {
 }
 
 #[wasm_bindgen]
-pub fn lint(source: &str) -> String {
-    parser::lint(source)
+pub fn generate_schema() -> String {
+    let schema = schemars::schema_for!(parser::models::ConfigDoc);
+    serde_json::to_string_pretty(&schema).unwrap()
 }
 
-#[wasm_bindgen]
-pub fn generate_schema() -> String {
-    parser::generate_schema()
-}

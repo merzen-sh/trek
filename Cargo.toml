@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["./crates/trek", "./crates/parser", "crates/parser-wasm"]
+members = ["./crates/trek", "./crates/parser", "crates/parser-wasm", "crates/parser/fuzz", "xtask/fuzz"]
 
 [workspace.package]
 version = "0.1.0"
@@ -36,3 +36,5 @@ opt-level = "z"
 strip = true
 codegen-units = 1
 panic = "abort"
+
+

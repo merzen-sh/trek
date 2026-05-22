@@ -8,11 +8,14 @@ full_moon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 indexmap.workspace = true
-stylua.workspace = true
-schemars = { version = "1.2.1", features = ["indexmap2"] }
+wasm-bindgen = { version = "0.2", optional = true }
+schemars = { version = "1", features = ["indexmap2"], optional = true }
 
 [features]
-wasm = []
+default = []
+wasm = ["wasm-bindgen"]
+schema = ["dep:schemars"]
 
 [dev-dependencies]
-rand.workspace = true
+annotate-snippets = "0.12.16"
+proptest = "1"

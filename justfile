@@ -47,8 +47,11 @@ build-wasm:
 	just compile-wasm
 	just bindgen-wasm web
 
+fuzz-test time="10":
+	@cargo run -p xtask -- fuzz --max-time {{ time }}
+
 generate-schema:
 	cargo run -p parser --example generate_schema > schema.json
 
 next-test:
-	cargo-nextest nextest run --all --all-targets
+	cargo nextest run --workspace

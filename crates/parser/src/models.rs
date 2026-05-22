@@ -1,184 +1,226 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
+
+/// Top-level document
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct ConfigDoc {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<IndexMap<String, serde_json::Value>>,
+    pub fields: ConfigIR,
+}
+
 pub type ConfigIR = IndexMap<String, ConfigNode>;
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
+// ---------------------------------------------------------------------------
+// Node variants — every node has exactly two concerns:
+//   1. runtime value  (value / rows / flag)
+//   2. metadata       (description, constraints, schema — all optional)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub enum ConfigNode {
-    String(StringValue),
-    Number(NumberValue),
-    Boolean(BooleanValue),
-    Enum(EnumValue),
-    Vector2(Vector2Value),
-    Vector3(Vector3Value),
-    Table(TableValue),
-    DynamicTable(DynamicTableValue),
-    Function(FunctionValue),
-    Expression(ExpressionValue),
-    Nil(NilValue),
-    Array(ArrayValue),
+    String(ScalarNode<String>),
+    Number(ScalarNode<String>),   // keep as String so "10" round-trips losslessly
+    Boolean(ScalarNode<bool>),
+    Enum(EnumNode),
+    Table(TableNode),
+    CfxFunction(CfxFunctionNode),
+    Vector2(Vector2Node),
+    Vector3(Vector3Node),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct StringValue {
-    pub value: String,
+// ---------------------------------------------------------------------------
+// Scalar node  (String / Number / Boolean share the same shape)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct ScalarNode<T> {
+    pub value: T,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
+    pub metadata: Option<ScalarMeta>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct NumberValue {
-    pub value: f64,
+/// Metadata for scalar fields.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct ScalarMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Vec<String>>,
+    /// `@RANGE = { min, max }` annotation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<Vec<String>>,
+}
+
+// ---------------------------------------------------------------------------
+// Vector2 / Vector3 nodes
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Vector2Node {
+    pub value: Vector2Value,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
+    pub metadata: Option<ScalarMeta>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct BooleanValue {
-    pub value: bool,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct EnumValue {
-    pub value: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Vector2Value {
     pub x: f64,
     pub y: f64,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Vector3Node {
+    pub value: Vector3Value,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub metadata: Option<ScalarMeta>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Vector3Value {
     pub x: f64,
     pub y: f64,
     pub z: f64,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct TableValue {
-    pub fields: IndexMap<String, ConfigNode>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
-}
+// ---------------------------------------------------------------------------
+// Enum node
+// ---------------------------------------------------------------------------
 
-pub type Row = IndexMap<String, serde_json::Value>;
-
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct DynamicTableValue {
-    pub rows: Vec<Row>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct ArrayValue {
-    pub items: Vec<ConfigNode>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct FunctionValue {
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct EnumNode {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
+    pub metadata: Option<EnumMeta>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct ExpressionValue {
-    pub value: String,
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct EnumMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Vec<String>>,
+    /// All allowed enum values declared via `@ENUM`.
+    pub options: Vec<String>,
+}
+
+/// Table node
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct TableNode {
+    /// Runtime rows keyed by row-id (the Lua key, e.g. `"key1"`).
+    pub rows: ConfigIR,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
+    pub metadata: Option<TableMeta>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct NilValue {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub metadata: Option<Box<FieldMetadata>>,
+/// Metadata for table fields — description + optional `@TABLE` schema.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct TableMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Vec<String>>,
+    /// Schema declared via `--[[@TABLE … ]]` block comment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<TableSchema>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, schemars::JsonSchema)]
-pub struct FieldMetadata {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub range: Option<RangeValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enum_options: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub map: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nil_marker: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub function_info: Option<FunctionInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub table_schema: Option<TableSchema>,
-}
+// ---------------------------------------------------------------------------
+// @TABLE schema
+// ---------------------------------------------------------------------------
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct RangeValue {
-    pub min: f64,
-    pub max: f64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct FunctionInfo {
-    pub resource_name: String,
-    pub function_name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
+/// Schema declared via `--[[@table … --]]` block comment.
+/// Controls web UI behaviour for this table field.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TableSchema {
-    pub layout: String,
-    pub schema: Vec<ColumnSchema>,
+    /// Allow the UI to insert new rows.
+    #[serde(default)]
+    pub allow_add: bool,
+    /// Allow the UI to delete existing rows.
+    #[serde(default)]
+    pub allow_delete: bool,
+    /// Allow the UI to edit cell values in existing rows.
+    #[serde(default)]
+    pub allow_edit: bool,
+    /// Column definitions in declaration order.
+    pub columns: Vec<ColumnDef>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, schemars::JsonSchema)]
-pub struct ColumnSchema {
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct ColumnDef {
+    /// Lua field name — maps to a key inside each row sub-table.
+    pub field: String,
+    #[serde(rename = "type")]
+    pub col_type: ColumnType,
+    pub label: String,
+    /// Allowed values — only meaningful when `col_type == Enum`.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub values: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub enum ColumnType {
+    Key,
+    String,
+    Number,
+    Enum,
+    Boolean,
+    #[serde(other)]
+    Unknown,
+}
+
+// ---------------------------------------------------------------------------
+// @CFX_FUNCTION metadata
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct CfxFunctionNode {
+    pub metadata: CfxFunctionMeta,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct CfxFunctionMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Vec<String>>,
+    pub args_schema: Vec<ArgDef>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct ArgDef {
     pub name: String,
     #[serde(rename = "type")]
-    pub column_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_key: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    pub arg_type: ColumnType,
+    pub label: String,
+    #[serde(default)]
+    pub required: bool,
 }
 
-impl FieldMetadata {
-    pub fn merge(&mut self, other: FieldMetadata) {
-        if let Some(desc) = other.description {
-            self.description = Some(desc);
-        }
-        if other.range.is_some() {
-            self.range = other.range;
-        }
-        if other.enum_options.is_some() {
-            self.enum_options = other.enum_options;
-        }
-        if let Some(m) = other.map {
-            self.map = Some(m);
-        }
-        if other.nil_marker.is_some() {
-            self.nil_marker = other.nil_marker;
-        }
-        if other.function_info.is_some() {
-            self.function_info = other.function_info;
-        }
-        if other.table_schema.is_some() {
-            self.table_schema = other.table_schema;
+impl From<&str> for ColumnType {
+    fn from(s: &str) -> Self {
+        match s {
+            "key"     => Self::Key,
+            "string"  => Self::String,
+            "number"  => Self::Number,
+            "enum"    => Self::Enum,
+            "boolean" => Self::Boolean,
+            _         => Self::Unknown,
         }
     }
 }
