@@ -4,6 +4,12 @@ pub mod models;
 mod visitor;
 mod trivia_parser;
 mod lua_gen;
+mod navigator;
+mod ast_synth;
+mod layout_visitor;
+mod session;
+
+pub use session::ConfigSession;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn guarded_parse(source: &str) -> Result<full_moon::ast::Ast, String> {

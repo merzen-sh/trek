@@ -224,3 +224,73 @@ impl From<&str> for ColumnType {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Lean layout IR (metadata + ast_path only — no runtime values)
+// ---------------------------------------------------------------------------
+
+/// Top-level layout document returned by [`crate::ConfigSession::get_layout`].
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct LayoutDoc {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub meta: Option<IndexMap<String, serde_json::Value>>,
+    pub fields: LayoutIR,
+}
+
+pub type LayoutIR = IndexMap<String, LayoutNode>;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub enum LayoutNode {
+    String(LayoutScalarNode),
+    Number(LayoutScalarNode),
+    Boolean(LayoutScalarNode),
+    Enum(LayoutEnumNode),
+    Table(LayoutTableNode),
+    CfxFunction(LayoutCfxFunctionNode),
+    Vector2(LayoutVectorNode),
+    Vector3(LayoutVectorNode),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct LayoutScalarNode {
+    pub ast_path: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub metadata: Option<ScalarMeta>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct LayoutEnumNode {
+    pub ast_path: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub metadata: Option<EnumMeta>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct LayoutTableNode {
+    pub ast_path: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub metadata: Option<TableMeta>,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub fields: LayoutIR,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct LayoutCfxFunctionNode {
+    pub ast_path: Vec<String>,
+    pub metadata: CfxFunctionMeta,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct LayoutVectorNode {
+    pub ast_path: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub metadata: Option<ScalarMeta>,
+}

@@ -159,9 +159,9 @@ fn parse_column_def(table: &full_moon::ast::TableConstructor) -> Option<ColumnDe
     for f in table.fields().iter() {
         let Field::NameKey { key, value, .. } = f else { continue };
         match key.token().to_string().as_str() {
-            "field"           => field    = Some(extract_string_value(value)),
+            "field" | "name"  => field    = Some(extract_string_value(value)),
             "type"            => col_type = Some(extract_string_value(value)),
-            "label"           => label    = Some(extract_string_value(value)), // tolerate common typo
+            "label"           => label    = Some(extract_string_value(value)),
             "values"          => values   = collect_string_list(value),
             _ => {}
         }

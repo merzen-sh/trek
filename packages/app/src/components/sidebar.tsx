@@ -60,7 +60,10 @@ const resources: Resource[] = [
     id: "parser",
     name: "WASM Parser",
     icon: Cpu,
-    menus: [{ label: "Converter", to: "/converter" }],
+    menus: [
+      { label: "Config Editor", to: "/" },
+      { label: "Converter", to: "/converter" },
+    ],
   },
 ];
 

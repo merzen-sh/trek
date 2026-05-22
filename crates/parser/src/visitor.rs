@@ -196,7 +196,7 @@ impl<'s> LuaAstVisitor<'s> {
 // Vector2 / Vector3 detection
 // ---------------------------------------------------------------------------
 
-fn try_parse_vector(expr: &Expression) -> Option<(&'static str, Vec<f64>)> {
+pub(crate) fn try_parse_vector(expr: &Expression) -> Option<(&'static str, Vec<f64>)> {
     let (prefix, suffixes) = match expr {
         Expression::FunctionCall(fc) => (fc.prefix(), fc.suffixes().collect::<Vec<_>>()),
         Expression::Var(Var::Expression(ve)) => (ve.prefix(), ve.suffixes().collect::<Vec<_>>()),
