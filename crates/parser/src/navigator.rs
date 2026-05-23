@@ -274,15 +274,16 @@ fn field_matches_key(field: &Field, key: &str) -> bool {
     }
 }
 
-/// Append a new `NameKey` row to the table at `path` (empty path = root config table).
+/// Append a new row to the table at `path` (empty path = root config table).
 pub fn patch_table_row_at_path(
     ast: Ast,
     path: &[String],
     row_key: &str,
     row_payload: &Value,
 ) -> Result<Ast, String> {
-    let new_field = ast_synth::table_row_field(row_key, row_payload)?;
-    map_root_table(ast, |root| append_field_at_table_path(root, path, new_field.clone()))
+    map_root_table(ast, |root| {
+        append_field_at_table_path(root, path, row_key, row_payload)
+    })
 }
 
 fn replace_field_value(
@@ -403,10 +404,11 @@ fn replace_in_table(
 fn append_field_at_table_path(
     table: TableConstructor,
     path: &[String],
-    new_field: Field,
+    key: &str,
+    payload: &Value,
 ) -> Result<TableConstructor, String> {
     if path.is_empty() {
-        return Ok(append_field_to_table(table, new_field));
+        return append_field_to_table(&table, key, payload);
     }
     let segment = &path[0];
     let rest = &path[1..];
@@ -417,13 +419,14 @@ fn append_field_at_table_path(
             let mut p = pair.clone();
             let field = p.value_mut();
             match field {
-                Field::NameKey { key, value, .. } => {
-                    if normalize_key_token(key) == *segment {
+                Field::NameKey { key: fk, value, .. } => {
+                    if normalize_key_token(fk) == *segment {
                         if let Expression::TableConstructor(inner) = value {
                             *value = Expression::TableConstructor(append_field_at_table_path(
                                 inner.clone(),
                                 rest,
-                                new_field.clone(),
+                                key,
+                                payload,
                             )?);
                         } else {
                             return Err(format!("key is not a table: {segment}"));
@@ -439,7 +442,8 @@ fn append_field_at_table_path(
                                 *value = Expression::TableConstructor(append_field_at_table_path(
                                     inner.clone(),
                                     rest,
-                                    new_field.clone(),
+                                    key,
+                                    payload,
                                 )?);
                             } else {
                                 return Err(format!("key is not a table: {segment}"));
@@ -455,23 +459,38 @@ fn append_field_at_table_path(
     Ok(table.with_fields(Punctuated::from_iter(fields)))
 }
 
-pub fn append_field_to_table(table: TableConstructor, mut new_field: Field) -> TableConstructor {
-    let indent = detect_existing_indent(&table);
-    if let Field::NameKey { key, .. } = &mut new_field {
-        *key = ast_synth::key_token_with_indent(
-            &normalize_key_token(key),
-            &indent,
-        );
+pub fn append_field_to_table(
+    table: &TableConstructor,
+    key: &str,
+    payload: &Value,
+) -> Result<TableConstructor, String> {
+    let field_indent = detect_existing_indent(table);
+    let close_indent = detect_closing_indent(table);
+
+    let src = table.to_string();
+    let trimmed = src.trim_end();
+    if !trimmed.ends_with('}') {
+        return Err("table source does not end with '}'".into());
     }
-    let mut fields: Vec<Pair<Field>> = table.fields().pairs().cloned().collect();
-    if let Some(last) = fields.last_mut() {
-        if last.punctuation().is_none() {
-            let punct = ast_synth::comma_token();
-            *last = Pair::Punctuated(last.clone().into_value(), punct);
-        }
+    let body = trimmed[..trimmed.len() - 1].trim_end().to_string();
+
+    let val_src = ast_synth::value_to_lua(payload, &field_indent);
+    let field_src = format!("{}{} = {}", field_indent, ast_synth::lua_key(key), val_src);
+
+    let entry_count = table.fields().len();
+    let new_src = if entry_count == 0 {
+        format!("{{\n{},\n{}}}", field_src, close_indent)
+    } else if body.ends_with(',') {
+        format!("{}\n{},\n{}}}", body, field_src, close_indent)
+    } else {
+        format!("{},\n{},\n{}}}", body, field_src, close_indent)
+    };
+
+    let expr = ast_synth::parse_table(&new_src)?;
+    match expr {
+        Expression::TableConstructor(tc) => Ok(tc),
+        _ => Err("expected table constructor".into()),
     }
-    fields.push(Pair::new(new_field, None));
-    table.with_fields(Punctuated::from_iter(fields))
 }
 
 pub fn map_root_table(
@@ -557,4 +576,19 @@ pub fn detect_existing_indent(table: &TableConstructor) -> String {
         }
     }
     "    ".to_string()
+}
+
+/// Detect whitespace indentation before the closing `}` of a table.
+fn detect_closing_indent(table: &TableConstructor) -> String {
+    let src = table.to_string();
+    let trimmed = src.trim_end();
+    if !trimmed.ends_with('}') {
+        return String::new();
+    }
+    let before = &trimmed[..trimmed.len() - 1];
+    if let Some(last_nl) = before.rfind('\n') {
+        before[last_nl + 1..].to_string()
+    } else {
+        String::new()
+    }
 }

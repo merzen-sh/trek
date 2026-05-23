@@ -176,7 +176,11 @@ impl<'s> LuaAstVisitor<'s> {
             Expression::Number(_) => {
                 let metadata = (description.is_some() || range.is_some())
                     .then(|| ScalarMeta { description, range });
-                ConfigNode::Number(ScalarNode { value: raw, metadata })
+                if raw.contains('.') {
+                    ConfigNode::Float(ScalarNode { value: raw, metadata })
+                } else {
+                    ConfigNode::Number(ScalarNode { value: raw, metadata })
+                }
             }
             Expression::Symbol(_) if raw == "true" || raw == "false" => {
                 let metadata = description

@@ -6,6 +6,7 @@ import type { LayoutNode } from "../types/layout";
 const TYPE_LABELS: Record<LayoutNode["type"], string> = {
   string: "String",
   number: "Number",
+  float: "Float",
   boolean: "Boolean",
   enum: "Enum",
   table: "Table",

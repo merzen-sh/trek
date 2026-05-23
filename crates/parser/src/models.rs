@@ -27,6 +27,7 @@ pub type ConfigIR = IndexMap<String, ConfigNode>;
 pub enum ConfigNode {
     String(ScalarNode<String>),
     Number(ScalarNode<String>),   // keep as String so "10" round-trips losslessly
+    Float(ScalarNode<String>),    // values with decimal point, e.g. "0.0", "3.14"
     Boolean(ScalarNode<bool>),
     Enum(EnumNode),
     Table(TableNode),
@@ -246,6 +247,7 @@ pub type LayoutIR = IndexMap<String, LayoutNode>;
 pub enum LayoutNode {
     String(LayoutScalarNode),
     Number(LayoutScalarNode),
+    Float(LayoutScalarNode),
     Boolean(LayoutScalarNode),
     Enum(LayoutEnumNode),
     Table(LayoutTableNode),

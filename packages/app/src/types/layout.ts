@@ -76,6 +76,7 @@ export interface LayoutVectorNode {
 export type LayoutNode =
   | { type: "string"; ast_path: string[]; metadata?: ScalarMeta }
   | { type: "number"; ast_path: string[]; metadata?: ScalarMeta }
+  | { type: "float"; ast_path: string[]; metadata?: ScalarMeta }
   | { type: "boolean"; ast_path: string[]; metadata?: ScalarMeta }
   | { type: "enum"; ast_path: string[]; metadata?: EnumMeta }
   | { type: "table"; ast_path: string[]; metadata?: TableMeta; fields?: Record<string, LayoutNode> }
@@ -94,6 +95,7 @@ export function parseLayoutNode(raw: Record<string, unknown>): LayoutNode {
   switch (type) {
     case "string":
     case "number":
+    case "float":
     case "boolean":
       return {
         type,
