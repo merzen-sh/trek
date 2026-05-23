@@ -1,8 +1,6 @@
 use full_moon::{
-    ast::{Expression, Field, Stmt, TableConstructor},
-    ast::punctuated::Pair,
+    ast::{Expression, Stmt},
     parse,
-    tokenizer::{Token, TokenReference, TokenType},
 };
 
 use serde_json::Value;
@@ -20,51 +18,114 @@ fn parse_lua_expr(src: &str) -> Result<Expression, String> {
     Err("no expression in parsed snippet".into())
 }
 
-pub fn comma_token() -> TokenReference {
-    token_symbol(",\n")
+/// Parse the source as a table constructor expression.
+pub fn parse_table(src: &str) -> Result<Expression, String> {
+    parse_lua_expr(src)
 }
 
-fn token_symbol(text: &str) -> TokenReference {
-    TokenReference::symbol(text).expect("invalid token symbol")
-}
-
-fn lua_string_body(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => {
-                use std::fmt::Write;
-                let _ = write!(out, "\\u{{{:04x}}}", c as u32);
+/// Generate formatted Lua source for a JSON value.
+/// `indent` is the whitespace prefix for this level (closing brace level).
+/// Inner fields use one additional `"    "` level.
+pub fn value_to_lua(value: &Value, indent: &str) -> String {
+    match value {
+        Value::Null => "nil".into(),
+        Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                i.to_string()
+            } else if let Some(u) = n.as_u64() {
+                u.to_string()
+            } else {
+                let f = n.as_f64().unwrap_or(0.0);
+                if f.fract() == 0.0 {
+                    format!("{f:.1}")
+                } else {
+                    f.to_string()
+                }
             }
-            c => out.push(c),
         }
+        Value::String(s) => {
+            let escaped = s
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t");
+            format!("\"{escaped}\"")
+        }
+        Value::Object(obj) => {
+            if obj.is_empty() {
+                return "{}".into();
+            }
+            let inner = format!("{}{}", indent, "    ");
+            let mut out = String::from("{\n");
+            for (key, val) in obj {
+                out.push_str(&inner);
+                out.push_str(&lua_key(key));
+                out.push_str(" = ");
+                out.push_str(&value_to_lua(val, &inner));
+                out.push_str(",\n");
+            }
+            out.push_str(indent);
+            out.push('}');
+            out
+        }
+        _ => "nil".into(),
     }
-    out
 }
 
-fn parse_lua_string_literal(s: &str) -> Result<Expression, String> {
-    parse_lua_expr(&format!("\"{}\"", lua_string_body(s)))
+/// Format a table key in Lua syntax — bare identifier for valid idents,
+/// `[number]` for numeric keys, `["string"]` otherwise.
+pub fn lua_key(key: &str) -> String {
+    if key.is_empty() {
+        return "[\"\"]".into();
+    }
+    let mut chars = key.chars();
+    let first = chars.next().unwrap();
+    let is_ident = (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if is_ident {
+        key.to_string()
+    } else if key.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        format!("[{key}]")
+    } else {
+        let escaped = key
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+        format!("[\"{escaped}\"]")
+    }
 }
 
 pub fn expression_from_json(value: &Value) -> Result<Expression, String> {
     match value {
         Value::Bool(b) => parse_lua_expr(if *b { "true" } else { "false" }),
         Value::Number(n) => {
-            let f = n.as_f64().ok_or("invalid number")?;
-            let text = if f.fract() == 0.0 {
-                format!("{f:.1}")
+            let text = if let Some(i) = n.as_i64() {
+                i.to_string()
+            } else if let Some(u) = n.as_u64() {
+                u.to_string()
             } else {
-                f.to_string()
+                let f = n.as_f64().ok_or("invalid number")?;
+                if f.fract() == 0.0 {
+                    format!("{f:.1}")
+                } else {
+                    f.to_string()
+                }
             };
             parse_lua_expr(&text)
         }
-        // Config string fields must stay string literals — never bare identifiers.
-        Value::String(s) => parse_lua_string_literal(s),
+        Value::String(s) => {
+            let escaped = s
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t");
+            parse_lua_expr(&format!("\"{escaped}\""))
+        }
         Value::Object(obj) if obj.contains_key("x") && obj.contains_key("y") => {
             let x = obj["x"].as_f64().ok_or("vector x must be number")?;
             let y = obj["y"].as_f64().ok_or("vector y must be number")?;
@@ -76,57 +137,9 @@ pub fn expression_from_json(value: &Value) -> Result<Expression, String> {
             }
         }
         Value::Object(obj) => {
-            let table = table_from_json_object(obj)?;
-            Ok(Expression::TableConstructor(table))
+            let lua = value_to_lua(&Value::Object(obj.clone()), "    ");
+            parse_lua_expr(&lua)
         }
         _ => Err("unsupported JSON value for Lua expression".into()),
     }
-}
-
-fn table_from_json_object(obj: &serde_json::Map<String, Value>) -> Result<TableConstructor, String> {
-    let indent = "    ";
-    let mut fields: Vec<Pair<Field>> = Vec::new();
-    for (key, val) in obj {
-        let field = name_key_field(key, expression_from_json(val)?, indent)?;
-        if let Some(last) = fields.last_mut() {
-            if last.punctuation().is_none() {
-                *last = Pair::Punctuated(last.clone().into_value(), comma_token());
-            }
-        }
-        fields.push(Pair::new(field, None));
-    }
-    Ok(TableConstructor::new().with_fields(full_moon::ast::punctuated::Punctuated::from_iter(
-        fields,
-    )))
-}
-
-pub fn table_row_field(row_key: &str, payload: &Value) -> Result<Field, String> {
-    let indent = "    ";
-    let value = match payload {
-        Value::Object(obj) => Expression::TableConstructor(table_from_json_object(obj)?),
-        other => expression_from_json(other)?,
-    };
-    name_key_field(row_key, value, indent)
-}
-
-pub fn key_token_with_indent(key: &str, indent: &str) -> TokenReference {
-    TokenReference::new(
-        vec![Token::new(TokenType::Whitespace {
-            characters: indent.into(),
-        })],
-        Token::new(TokenType::Identifier {
-            identifier: key.into(),
-        }),
-        vec![Token::new(TokenType::Whitespace {
-            characters: " ".into(),
-        })],
-    )
-}
-
-pub fn name_key_field(key: &str, value: Expression, indent: &str) -> Result<Field, String> {
-    Ok(Field::NameKey {
-        key: key_token_with_indent(key, indent),
-        equal: token_symbol(" = "),
-        value,
-    })
 }

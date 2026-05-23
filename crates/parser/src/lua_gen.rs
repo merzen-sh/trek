@@ -101,7 +101,7 @@ fn write_node(key: &str, node: &ConfigNode, out: &mut String, depth: usize) {
             out.push_str(&escape_lua(&n.value));
             out.push_str(",\n");
         }
-        ConfigNode::Number(n) => {
+        ConfigNode::Number(n) | ConfigNode::Float(n) => {
             write_scalar_meta(n.metadata.as_ref(), out, depth);
             write_key(key, out, depth);
             out.push_str(&n.value);
@@ -163,11 +163,13 @@ fn write_scalar_meta(meta: Option<&ScalarMeta>, out: &mut String, depth: usize) 
     if let Some(range) = &meta.range {
         indent(out, depth);
         out.push_str("--@RANGE = { ");
+        let keys = ["min", "max"];
         for (i, v) in range.iter().enumerate() {
             if i > 0 {
                 out.push_str(", ");
             }
-            out.push_str(v);
+            let key = keys.get(i).copied().unwrap_or("value");
+            let _ = write!(out, "{key} = {v}");
         }
         out.push_str(" }\n");
     }

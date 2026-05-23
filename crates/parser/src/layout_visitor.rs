@@ -11,6 +11,7 @@ use crate::models::{
     LayoutCfxFunctionNode, LayoutDoc, LayoutEnumNode, LayoutIR, LayoutNode, LayoutScalarNode,
     LayoutTableNode, LayoutVectorNode, EnumMeta, ScalarMeta, TableMeta,
 };
+use crate::trivia_parser::extract_string_value;
 use crate::navigator::field_key_value;
 use crate::trivia_parser::{parse_annotations, parse_lua_key_values};
 use indexmap::IndexMap;
@@ -209,10 +210,20 @@ impl<'s> LayoutVisitor<'s> {
             .then(|| ScalarMeta { description, range });
 
         match value {
-            Expression::Number(_) => LayoutNode::Number(LayoutScalarNode {
-                ast_path: path.to_vec(),
-                metadata,
-            }),
+            Expression::Number(_) => {
+                let raw = extract_string_value(value);
+                if raw.contains('.') {
+                    LayoutNode::Float(LayoutScalarNode {
+                        ast_path: path.to_vec(),
+                        metadata,
+                    })
+                } else {
+                    LayoutNode::Number(LayoutScalarNode {
+                        ast_path: path.to_vec(),
+                        metadata,
+                    })
+                }
+            }
             Expression::Symbol(_) => LayoutNode::Boolean(LayoutScalarNode {
                 ast_path: path.to_vec(),
                 metadata,

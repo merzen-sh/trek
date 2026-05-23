@@ -1,4 +1,49 @@
-use parser::ConfigSession;
+use parser::{lua_to_json, json_to_lua, ConfigSession};
+
+#[test]
+fn test_float_number_discrimination() {
+    let json = lua_to_json(r#"config = {
+    int_val = 42,
+    float_val = 0.0,
+    another_float = 3.14,
+    big_int = 1000,
+}"#).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let fields = doc["fields"].as_object().unwrap();
+    assert_eq!(fields["int_val"]["type"], "number");
+    assert_eq!(fields["int_val"]["value"], "42");
+    assert_eq!(fields["big_int"]["type"], "number");
+    assert_eq!(fields["big_int"]["value"], "1000");
+    assert_eq!(fields["float_val"]["type"], "float");
+    assert_eq!(fields["float_val"]["value"], "0.0");
+    assert_eq!(fields["another_float"]["type"], "float");
+    assert_eq!(fields["another_float"]["value"], "3.14");
+
+    // Round-trip: JSON -> Lua -> JSON preserves float/number distinction
+    let lua = json_to_lua(&json).unwrap();
+    let json2 = lua_to_json(&lua).unwrap();
+    let doc2: serde_json::Value = serde_json::from_str(&json2).unwrap();
+    assert_eq!(doc, doc2);
+}
+
+#[test]
+fn test_range_with_named_keys() {
+    let json = lua_to_json(r#"config = {
+    --@RANGE = { min = 1, max = 256 }
+    max_players = 64,
+}"#).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let field = &doc["fields"]["max_players"];
+    assert_eq!(field["type"], "number");
+    assert_eq!(field["value"], "64");
+    let meta = field["metadata"].as_object().unwrap();
+    let range = meta["range"].as_array().unwrap();
+    assert_eq!(range, &[serde_json::json!("1"), serde_json::json!("256")]);
+
+    // Round-trip preserves range values with named keys
+    let lua = json_to_lua(&json).unwrap();
+    assert!(lua.contains("--@RANGE = { min = 1, max = 256 }"));
+}
 
 #[test]
 fn test_lossless_print_regression() {

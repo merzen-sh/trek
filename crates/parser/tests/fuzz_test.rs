@@ -49,6 +49,7 @@ fn norm_node(node: &mut ConfigNode) {
     match node {
         ConfigNode::String(n) => norm_scalar(&mut n.metadata),
         ConfigNode::Number(n) => norm_scalar(&mut n.metadata),
+        ConfigNode::Float(n) => norm_scalar(&mut n.metadata),
         ConfigNode::Boolean(n) => norm_scalar(&mut n.metadata),
         ConfigNode::Vector2(n) => norm_scalar(&mut n.metadata),
         ConfigNode::Vector3(n) => norm_scalar(&mut n.metadata),
@@ -127,12 +128,24 @@ fn number_node() -> impl Strategy<Value = ConfigNode> {
         prop_oneof![
             Just("0".to_string()),
             "[1-9][0-9]{0,3}".prop_map(|s: String| s),
-            "[0-9]+\\.[0-9]+".prop_map(|s: String| s),
         ],
         scalar_meta_strategy(),
     )
         .prop_map(
             |(value, metadata)| ConfigNode::Number(ScalarNode { value, metadata }),
+        )
+}
+
+fn float_node() -> impl Strategy<Value = ConfigNode> {
+    (
+        prop_oneof![
+            Just("0.0".to_string()),
+            "[0-9]+\\.[0-9]+".prop_map(|s: String| s),
+        ],
+        scalar_meta_strategy(),
+    )
+        .prop_map(
+            |(value, metadata)| ConfigNode::Float(ScalarNode { value, metadata }),
         )
 }
 
@@ -309,6 +322,7 @@ fn leaf_node() -> impl Strategy<Value = ConfigNode> {
     prop_oneof![
         string_node(),
         number_node(),
+        float_node(),
         boolean_node(),
         enum_node(),
         vector2_node(),

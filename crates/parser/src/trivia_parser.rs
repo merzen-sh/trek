@@ -234,7 +234,11 @@ fn parse_table_values(ann: &str) -> Option<Vec<String>> {
             let v: Vec<String> = table
                 .fields()
                 .iter()
-                .filter_map(|f| if let Field::NoKey(e) = f { Some(extract_string_value(e)) } else { None })
+                .filter_map(|f| match f {
+                    Field::NoKey(e) => Some(extract_string_value(e)),
+                    Field::NameKey { value, .. } => Some(extract_string_value(value)),
+                    _ => None,
+                })
                 .collect();
             if v.is_empty() { None } else { Some(v) }
         })

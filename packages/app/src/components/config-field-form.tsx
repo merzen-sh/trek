@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { Badge, Button, cn } from "ui";
-import type { ColumnDef, LayoutNode, TableSchema } from "../types/layout";
+import { useCallback, useEffect, useState } from "react";
+import { Badge, Button, cn, Slider } from "ui";
+import type { ColumnDef, LayoutNode, ScalarMeta, TableSchema } from "../types/layout";
 import {
   cellDisplayValue,
   coerceCellValue,
@@ -33,11 +33,11 @@ function Description({ lines }: { lines?: string[] }) {
 function ScalarEditor({
   node,
   value,
-  onSave,
+  onChange,
 }: {
   node: LayoutNode;
   value: unknown;
-  onSave: (v: unknown) => void;
+  onChange: (v: unknown) => void;
 }) {
   const [draft, setDraft] = useState(String(value ?? ""));
 
@@ -52,7 +52,7 @@ function ScalarEditor({
         <input
           type="checkbox"
           checked={checked}
-          onChange={(e) => onSave(e.target.checked)}
+          onChange={(e) => onChange(e.target.checked)}
           className="h-4 w-4 rounded border-input"
         />
         <span className="text-sm font-mono">{checked ? "true" : "false"}</span>
@@ -64,7 +64,7 @@ function ScalarEditor({
     return (
       <select
         value={String(value ?? "")}
-        onChange={(e) => onSave(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         className={inputClass}
       >
         {node.metadata.options.map((opt) => (
@@ -76,22 +76,64 @@ function ScalarEditor({
     );
   }
 
+  if (node.type === "number" || node.type === "float") {
+    const meta = node.metadata as ScalarMeta | undefined;
+    const range = meta?.range;
+    if (range?.length === 2) {
+      const min = Number(range[0]);
+      const max = Number(range[1]);
+      if (Number.isFinite(min) && Number.isFinite(max) && min < max) {
+        const numVal = Number(value ?? min);
+        const clamped = Math.min(max, Math.max(min, Number.isFinite(numVal) ? numVal : min));
+        const step = node.type === "float" ? (max - min) / 100 : 1;
+        return (
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-mono text-muted-foreground w-12 text-right tabular-nums">
+              {clamped}
+            </span>
+            <Slider
+              min={min}
+              max={max}
+              step={step}
+              value={clamped}
+              onChange={(v) => onChange(v)}
+              className="flex-1"
+            />
+          </div>
+        );
+      }
+    }
+    return (
+      <input
+        type="text"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          const n = Number(draft);
+          onChange(Number.isFinite(n) ? n : draft);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            const n = Number(draft);
+            onChange(Number.isFinite(n) ? n : draft);
+          }
+        }}
+        className={inputClass}
+      />
+    );
+  }
+
   return (
     <input
-      type={node.type === "number" ? "text" : "text"}
+      type="text"
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
-        if (node.type === "number") {
-          const n = Number(draft);
-          onSave(Number.isFinite(n) ? n : draft);
-        } else {
-          onSave(draft);
-        }
+        onChange(draft);
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
-          e.currentTarget.blur();
+          onChange(draft);
         }
       }}
       className={inputClass}
@@ -102,11 +144,11 @@ function ScalarEditor({
 function VectorEditor({
   dims,
   value,
-  onSave,
+  onChange,
 }: {
   dims: 2 | 3;
   value: Record<string, number> | null;
-  onSave: (v: { x: number; y: number; z?: number }) => void;
+  onChange: (v: { x: number; y: number; z?: number }) => void;
 }) {
   const [x, setX] = useState(String(value?.x ?? 0));
   const [y, setY] = useState(String(value?.y ?? 0));
@@ -124,7 +166,7 @@ function VectorEditor({
       y: Number(y) || 0,
     };
     if (dims === 3) payload.z = Number(z) || 0;
-    onSave(payload);
+    onChange(payload);
   };
 
   return (
@@ -331,6 +373,20 @@ function TableRowsPanel({
   );
 }
 
+function timeAgo(date: Date, now: number): string {
+  const secs = Math.floor((now - date.getTime()) / 1000);
+  if (secs < 5) return "just now";
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ago`;
+}
+
+function isScalarType(t: string): boolean {
+  return t === "string" || t === "number" || t === "float" || t === "boolean" || t === "enum";
+}
+
 export function ConfigFieldForm({
   node,
   getValueAtPath,
@@ -339,11 +395,29 @@ export function ConfigFieldForm({
   removeTableRow,
   revision,
 }: ConfigFieldFormProps) {
-  const [value, setValue] = useState<unknown>(undefined);
+  const [original, setOriginal] = useState<unknown>(undefined);
+  const [draft, setDraft] = useState<unknown>(undefined);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(Date.now());
+
+  const isDirty = draft !== original;
+
+  useEffect(() => {
+    if (!lastSavedAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [lastSavedAt]);
+
+  useEffect(() => {
+    setDraft(undefined);
+    setOriginal(undefined);
+    setLastSavedAt(null);
+  }, [node?.ast_path.join(".")]);
 
   useEffect(() => {
     if (!node) {
-      setValue(undefined);
+      setOriginal(undefined);
+      setDraft(undefined);
       return;
     }
     if (
@@ -351,19 +425,41 @@ export function ConfigFieldForm({
       node.metadata?.schema &&
       (node.metadata.schema.columns?.length || node.metadata.schema.allow_add)
     ) {
-      setValue(undefined);
+      setOriginal(undefined);
+      setDraft(undefined);
       return;
     }
     if (node.type === "table" && node.fields && Object.keys(node.fields).length > 0) {
-      setValue(undefined);
+      setOriginal(undefined);
+      setDraft(undefined);
       return;
     }
     if (node.type === "cfx_function") {
-      setValue(undefined);
+      setOriginal(undefined);
+      setDraft(undefined);
       return;
     }
-    setValue(getValueAtPath(node.ast_path));
+    if (!isScalarType(node.type) && node.type !== "vector2" && node.type !== "vector3") {
+      setOriginal(undefined);
+      setDraft(undefined);
+      return;
+    }
+    const v = getValueAtPath(node.ast_path);
+    setOriginal(v);
+    setDraft(v);
   }, [node, revision, getValueAtPath]);
+
+  const handleSave = useCallback(() => {
+    if (!node || !isScalarType(node.type)) return;
+    patchValueAtPath(node.ast_path, draft);
+    setOriginal(draft);
+    setLastSavedAt(new Date());
+    setNow(Date.now());
+  }, [node, draft, patchValueAtPath]);
+
+  const handleDiscard = useCallback(() => {
+    setDraft(original);
+  }, [original]);
 
   if (!node) {
     return (
@@ -450,31 +546,41 @@ export function ConfigFieldForm({
       {node.type === "vector2" && (
         <VectorEditor
           dims={2}
-          value={value as Record<string, number> | null}
-          onSave={(v) => patchValueAtPath(node.ast_path, v)}
+          value={draft as Record<string, number> | null}
+          onChange={(v) => setDraft(v)}
         />
       )}
       {node.type === "vector3" && (
         <VectorEditor
           dims={3}
-          value={value as Record<string, number> | null}
-          onSave={(v) => patchValueAtPath(node.ast_path, v)}
+          value={draft as Record<string, number> | null}
+          onChange={(v) => setDraft(v)}
         />
       )}
-      {(node.type === "string" ||
-        node.type === "number" ||
-        node.type === "boolean" ||
-        node.type === "enum") && (
+      {isScalarType(node.type) && (
         <ScalarEditor
           node={node}
-          value={value}
-          onSave={(v) => patchValueAtPath(node.ast_path, v)}
+          value={draft}
+          onChange={(v) => setDraft(v)}
         />
       )}
-      {(node.type === "string" || node.type === "number") && node.metadata?.range && (
+      {node.type === "string" && node.metadata?.range && (
         <p className="text-[10px] text-muted-foreground font-mono">
           range: {node.metadata.range.join(", ")}
         </p>
+      )}
+      {(isScalarType(node.type) || node.type === "vector2" || node.type === "vector3") && (
+        <div className="flex items-center gap-2 pt-2 border-t">
+          <Button type="button" size="sm" onClick={handleSave} disabled={!isDirty}>
+            Save
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={handleDiscard} disabled={!isDirty}>
+            Discard
+          </Button>
+          <span className="ml-auto text-[10px] text-muted-foreground font-mono">
+            {lastSavedAt ? `Saved ${timeAgo(lastSavedAt, now)}` : "Unsaved"}
+          </span>
+        </div>
       )}
     </div>
   );
