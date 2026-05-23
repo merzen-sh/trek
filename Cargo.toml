@@ -24,8 +24,6 @@ utoipa-swagger-ui = { version = "8", default-features = false, features = ["axum
 bytes = "1"
 http-body-util = "0.1"
 indexmap = { version = "2", default-features = false, features = ["serde"] }
-stylua = { version = "2.5", default-features = false, features = ["cfxlua"] }
-rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
 
 [workspace.lints]
 rust = {}
