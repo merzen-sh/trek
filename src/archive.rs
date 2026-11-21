@@ -1,8 +1,10 @@
+use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipWriter};
 
@@ -102,6 +104,35 @@ fn is_zip_archive(path: &Path) -> bool {
         .ok()
         .and_then(|file| zip::ZipArchive::new(file).ok())
         .is_some()
+}
+
+/// Compute the SHA-256 checksum of a file as lowercase hexadecimal.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read.
+pub(crate) fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = File::open(path)
+        .with_context(|| format!("failed to open archive {} for hashing", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 16 * 1024];
+
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .with_context(|| format!("failed to read archive {} for hashing", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    let digest = hasher.finalize();
+    let mut checksum = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(checksum, "{byte:02x}");
+    }
+    Ok(checksum)
 }
 
 /// Use the canonical path for non-symlink outputs and the lexical path for
@@ -247,6 +278,51 @@ mod tests {
         let mut writer = ZipWriter::new(File::create(path)?);
         writer.add_directory("old/", SimpleFileOptions::default())?;
         writer.finish()?;
+        Ok(())
+    }
+
+    fn hex_sha256(data: &[u8]) -> String {
+        use std::fmt::Write as _;
+
+        let digest = Sha256::digest(data);
+        let mut checksum = String::with_capacity(digest.len() * 2);
+        for &byte in &digest {
+            let _ = write!(checksum, "{byte:02x}");
+        }
+        checksum
+    }
+
+    #[test]
+    fn sha256_file_matches_known_vector() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("abc.txt");
+        write_file(&path, "abc")?;
+
+        assert_eq!(
+            sha256_file(&path)?,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sha256_file_reports_unreadable_path() -> Result<()> {
+        let Err(error) = sha256_file(Path::new("/definitely/not/here.zip")) else {
+            anyhow::bail!("expected an error");
+        };
+
+        assert!(format!("{error:#}").contains("failed to open archive"));
+        Ok(())
+    }
+
+    #[test]
+    fn sha256_file_streams_past_one_buffer() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("large.bin");
+        let data = vec![b'a'; 16 * 1024 + 1];
+        std::fs::write(&path, &data)?;
+
+        assert_eq!(sha256_file(&path)?, hex_sha256(&data));
         Ok(())
     }
 

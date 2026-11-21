@@ -8,6 +8,7 @@ rust-version = "1.89"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 glob = "0.3"
+sha2 = { version = "0.11", default-features = false }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
