@@ -16,6 +16,8 @@ pub enum Command {
     Pack(PackArgs),
     /// Show or bump the resource version in fxmanifest.lua.
     Version(VersionArgs),
+    /// Bump the resource version and create a release archive.
+    Release(ReleaseArgs),
 }
 
 #[derive(Debug, Args)]
@@ -76,6 +78,47 @@ pub struct VersionArgs {
         default_value = "fxmanifest.lua"
     )]
     pub manifest: PathBuf,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("bump")
+        .args(["patch", "minor", "major"])
+        .multiple(false)
+))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "command-line flags are naturally booleans"
+)]
+pub struct ReleaseArgs {
+    /// Bump the patch version.
+    #[arg(long)]
+    pub patch: bool,
+
+    /// Bump the minor version and reset patch.
+    #[arg(long)]
+    pub minor: bool,
+
+    /// Bump the major version and reset minor/patch.
+    #[arg(long)]
+    pub major: bool,
+
+    /// Output directory for the ZIP archive, created when missing.
+    #[arg(short = 'o', long, value_name = "PATH", default_value = ".")]
+    pub output: PathBuf,
+
+    /// Path to the target fxmanifest.lua.
+    #[arg(
+        short = 'm',
+        long,
+        value_name = "PATH",
+        default_value = "fxmanifest.lua"
+    )]
+    pub manifest: PathBuf,
+
+    /// Include the archive's SHA-256 checksum in the report.
+    #[arg(long)]
+    pub sha256: bool,
 }
 
 #[cfg(test)]
@@ -166,5 +209,53 @@ mod tests {
     #[test]
     fn version_rejects_multiple_bump_flags() {
         assert!(Cli::try_parse_from(["trek", "version", "--patch", "--minor"]).is_err());
+    }
+
+    #[test]
+    fn parses_release_options() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from([
+            "trek",
+            "release",
+            "--patch",
+            "--sha256",
+            "-o",
+            "dist",
+            "-m",
+            "resource/fxmanifest.lua",
+        ])?;
+
+        let Command::Release(args) = cli.command else {
+            anyhow::bail!("expected release command");
+        };
+        assert!(args.patch);
+        assert!(!args.minor);
+        assert!(!args.major);
+        assert!(args.sha256);
+        assert_eq!(args.output, PathBuf::from("dist"));
+        assert_eq!(args.manifest, PathBuf::from("resource/fxmanifest.lua"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn release_defaults_to_current_directory_and_local_manifest() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["trek", "release"])?;
+
+        let Command::Release(args) = cli.command else {
+            anyhow::bail!("expected release command");
+        };
+        assert!(!args.patch);
+        assert!(!args.minor);
+        assert!(!args.major);
+        assert!(!args.sha256);
+        assert_eq!(args.output, PathBuf::from("."));
+        assert_eq!(args.manifest, PathBuf::from("fxmanifest.lua"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn release_rejects_multiple_bump_flags() {
+        assert!(Cli::try_parse_from(["trek", "release", "--patch", "--major"]).is_err());
     }
 }

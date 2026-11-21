@@ -21,7 +21,7 @@ impl Outcome<'_> {
         match self {
             Self::DryRun { error: None } => "Success (dry run; archive not written)".into(),
             Self::DryRun { error: Some(error) } | Self::Failed { error } => {
-                format!("Failed: {error}")
+                format!("Failed: {}", single_line(error))
             }
             Self::Written => "Success (archive written)".into(),
         }
@@ -48,6 +48,29 @@ impl Checksum<'_> {
     }
 }
 
+/// The version state shown in a release report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseVersion<'a> {
+    /// No bump was requested.
+    Unchanged(&'a str),
+    /// The version was bumped.
+    Bumped {
+        /// The version before the bump.
+        from: &'a str,
+        /// The version after the bump.
+        to: &'a str,
+    },
+}
+
+impl ReleaseVersion<'_> {
+    fn label(self) -> String {
+        match self {
+            Self::Unchanged(version) => format!("`{version}` (unchanged)"),
+            Self::Bumped { from, to } => format!("`{from}` -> `{to}`"),
+        }
+    }
+}
+
 /// Render a Markdown report for a completed or failed pack operation.
 #[must_use]
 pub fn render_markdown(
@@ -61,6 +84,72 @@ pub fn render_markdown(
 
     let _ = writeln!(report, "# Pack Report");
     let _ = writeln!(report);
+    render_report_body(&mut report, manifest, plan, output, outcome, checksum);
+    report
+}
+
+/// Render a Markdown report for a completed or failed release.
+#[must_use]
+pub fn render_release(
+    resource_manifest: &Path,
+    version: ReleaseVersion<'_>,
+    manifest: &Manifest,
+    plan: &Plan,
+    output: &Path,
+    outcome: Outcome<'_>,
+    checksum: Option<Checksum<'_>>,
+) -> String {
+    let mut report = String::new();
+
+    let _ = writeln!(report, "# Release Report");
+    let _ = writeln!(report);
+    let _ = writeln!(
+        report,
+        "- **Resource manifest:** `{}`",
+        resource_manifest.display()
+    );
+    let _ = writeln!(report, "- **Version:** {}", version.label());
+    render_report_body(&mut report, manifest, plan, output, outcome, checksum);
+    report
+}
+
+/// Render a Markdown report for a release that stopped before packing.
+#[must_use]
+pub fn render_release_failure(
+    resource_manifest: &Path,
+    version: Option<ReleaseVersion<'_>>,
+    error: &str,
+) -> String {
+    let mut report = String::new();
+
+    let _ = writeln!(report, "# Release Report");
+    let _ = writeln!(report);
+    let _ = writeln!(
+        report,
+        "- **Resource manifest:** `{}`",
+        resource_manifest.display()
+    );
+    if let Some(version) = version {
+        let _ = writeln!(report, "- **Version:** {}", version.label());
+    }
+    let _ = writeln!(report, "- **Status:** Failed: {}", single_line(error));
+    let _ = writeln!(report);
+    let _ = writeln!(report, "## Problems");
+    let _ = writeln!(report);
+    let _ = writeln!(report, "| Error |");
+    let _ = writeln!(report, "| --- |");
+    let _ = writeln!(report, "| {} |", code_cell(error));
+    report
+}
+
+fn render_report_body(
+    report: &mut String,
+    manifest: &Manifest,
+    plan: &Plan,
+    output: &Path,
+    outcome: Outcome<'_>,
+    checksum: Option<Checksum<'_>>,
+) {
     let _ = writeln!(
         report,
         "- **Input directory:** `{}`",
@@ -134,8 +223,6 @@ pub fn render_markdown(
             );
         }
     }
-
-    report
 }
 
 /// Render the plain-text preview printed by `--dry-run` without `--report`.
@@ -185,6 +272,10 @@ pub fn render_preview(
     }
 
     preview
+}
+
+fn single_line(value: &str) -> String {
+    value.replace(['\n', '\r'], " ")
 }
 
 fn code_cell(value: &str) -> String {
@@ -436,5 +527,62 @@ mod tests {
         assert_eq!(code_cell("a`b"), "``a`b``");
         assert_eq!(code_cell("`a"), "`` `a ``");
         assert_eq!(code_cell("a\nb"), "`a b`");
+    }
+
+    #[test]
+    fn release_report_includes_version_and_pack_details() {
+        let report = render_release(
+            Path::new("/tmp/fxmanifest.lua"),
+            ReleaseVersion::Unchanged("1.2.3"),
+            &sample_manifest(),
+            &sample_plan(),
+            Path::new("/tmp/out.zip"),
+            Outcome::Written,
+            Some(Checksum::Value("abc123")),
+        );
+
+        assert!(report.contains("# Release Report"));
+        assert!(!report.contains("# Pack Report"));
+        assert!(report.contains("- **Resource manifest:** `/tmp/fxmanifest.lua`"));
+        assert!(report.contains("- **Version:** `1.2.3` (unchanged)"));
+        assert!(report.contains("- **SHA-256:** `abc123`"));
+        assert!(report.contains("Success (archive written)"));
+        assert!(report.contains("| `assets/a.txt` | 5 |"));
+    }
+
+    #[test]
+    fn release_report_marks_bumped_version() {
+        let report = render_release(
+            Path::new("/tmp/fxmanifest.lua"),
+            ReleaseVersion::Bumped {
+                from: "1.2.3",
+                to: "1.2.4",
+            },
+            &sample_manifest(),
+            &sample_plan(),
+            Path::new("/tmp/out.zip"),
+            Outcome::Written,
+            None,
+        );
+
+        assert!(report.contains("- **Version:** `1.2.3` -> `1.2.4`"));
+    }
+
+    #[test]
+    fn release_failure_report_lists_error() {
+        let report = render_release_failure(
+            Path::new("/tmp/fxmanifest.lua"),
+            Some(ReleaseVersion::Bumped {
+                from: "1.2.3",
+                to: "1.2.4",
+            }),
+            "failed to read pattern file",
+        );
+
+        assert!(report.contains("# Release Report"));
+        assert!(report.contains("- **Resource manifest:** `/tmp/fxmanifest.lua`"));
+        assert!(report.contains("- **Version:** `1.2.3` -> `1.2.4`"));
+        assert!(report.contains("- **Status:** Failed: failed to read pattern file"));
+        assert!(report.contains("| `failed to read pattern file` |"));
     }
 }

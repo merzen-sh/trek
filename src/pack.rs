@@ -370,14 +370,33 @@ pub(crate) fn default_output(input: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Execute the `pack` subcommand.
+/// The result of validating and writing a pack operation.
+///
+/// Post-read failures (validation, collision checks, writing, and hashing) are
+/// stored in [`Self::failure`] so the caller can render a report first. Callers
+/// must return that error after rendering.
+#[must_use = "a pack can fail without returning Err; inspect `failure`"]
+pub(crate) struct PackOutcome {
+    pub(crate) manifest: Manifest,
+    pub(crate) plan: Plan,
+    pub(crate) output: PathBuf,
+    pub(crate) failure: Option<anyhow::Error>,
+    pub(crate) checksum: Option<String>,
+}
+
+impl PackOutcome {
+    pub(crate) fn into_result(self) -> Result<()> {
+        self.failure.map_or(Ok(()), Err)
+    }
+}
+
+/// Build the plan, write the archive, and optionally hash it.
 ///
 /// # Errors
 ///
-/// Returns an error if the pattern file cannot be read, validation fails, the
-/// output collides with the pattern file, the archive cannot be written or
-/// hashed, or output cannot be printed.
-pub fn run(args: &PackArgs) -> Result<()> {
+/// Returns an error if the pattern file cannot be read. Post-read failures are
+/// stored in [`PackOutcome::failure`] so the caller can render a report first.
+pub(crate) fn execute(args: &PackArgs) -> Result<PackOutcome> {
     let pattern_file = args.input.join(".pack");
     let manifest = Manifest::read(&pattern_file)?;
     let output = match &args.output {
@@ -406,8 +425,32 @@ pub fn run(args: &PackArgs) -> Result<()> {
         }
     }
 
-    let failure_message = failure.as_ref().map(|error| format!("{error:#}"));
-    let outcome = if args.dry_run {
+    Ok(PackOutcome {
+        manifest,
+        plan,
+        output,
+        failure,
+        checksum,
+    })
+}
+
+/// Execute the `pack` subcommand.
+///
+/// # Errors
+///
+/// Returns an error if the pattern file cannot be read, validation fails, the
+/// output collides with the pattern file, the archive cannot be written or
+/// hashed, or output cannot be printed.
+pub fn run(args: &PackArgs) -> Result<()> {
+    let outcome = execute(args)?;
+    render(args, &outcome)?;
+
+    outcome.into_result()
+}
+
+fn render(args: &PackArgs, outcome: &PackOutcome) -> Result<()> {
+    let failure_message = outcome.failure.as_ref().map(|error| format!("{error:#}"));
+    let status = if args.dry_run {
         Outcome::DryRun {
             error: failure_message.as_deref(),
         }
@@ -418,7 +461,7 @@ pub fn run(args: &PackArgs) -> Result<()> {
         }
     };
     let checksum_display = if args.sha256 {
-        Some(match checksum.as_deref() {
+        Some(match outcome.checksum.as_deref() {
             Some(checksum) => Checksum::Value(checksum),
             None => Checksum::Unavailable,
         })
@@ -428,32 +471,34 @@ pub fn run(args: &PackArgs) -> Result<()> {
 
     if args.report {
         write_stdout(&render_markdown(
-            &manifest,
-            &plan,
-            &output,
-            outcome,
+            &outcome.manifest,
+            &outcome.plan,
+            &outcome.output,
+            status,
             checksum_display,
         ))?;
     } else if args.dry_run {
-        write_stdout(&render_preview(&manifest, &plan, &output, checksum_display))?;
-    } else if failure.is_none() {
+        write_stdout(&render_preview(
+            &outcome.manifest,
+            &outcome.plan,
+            &outcome.output,
+            checksum_display,
+        ))?;
+    } else if outcome.failure.is_none() {
         let summary = format!(
             "Created {} ({} files, {} directories, {} bytes)\n",
-            output.display(),
-            plan.file_count(),
-            plan.directory_count(),
-            plan.total_size()
+            outcome.output.display(),
+            outcome.plan.file_count(),
+            outcome.plan.directory_count(),
+            outcome.plan.total_size()
         );
         write_stdout(&summary)?;
-        if let Some(checksum) = &checksum {
+        if let Some(checksum) = &outcome.checksum {
             write_stdout(&format!("SHA-256: {checksum}\n"))?;
         }
     }
 
-    match failure {
-        Some(error) => Err(error),
-        None => Ok(()),
-    }
+    Ok(())
 }
 
 fn validation_error(plan: &Plan) -> anyhow::Error {

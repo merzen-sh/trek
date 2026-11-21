@@ -5,7 +5,7 @@ use anyhow::Result;
 
 mod common;
 
-use common::{sha256_hex, write_file, zip_names};
+use common::{sha256_hex, write_file, zip_file_contents, zip_names};
 
 fn trek() -> Command {
     Command::new(env!("CARGO_BIN_EXE_trek"))
@@ -680,5 +680,233 @@ fn version_missing_declaration_fails() -> Result<()> {
     assert!(!result.status.success());
     let stderr = String::from_utf8(result.stderr)?;
     assert!(stderr.contains("no version declaration"));
+    Ok(())
+}
+
+fn directory_name(path: &std::path::Path) -> Result<String> {
+    Ok(path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("directory has no name"))?
+        .to_string_lossy()
+        .into_owned())
+}
+
+#[test]
+fn release_packs_without_bumping_version() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let name = directory_name(dir.path())?;
+    write_file(&dir.path().join(".pack"), "*.lua\n")?;
+    write_file(&dir.path().join("fxmanifest.lua"), "version '1.2.3'\n")?;
+    write_file(&dir.path().join("main.lua"), "main")?;
+    let output_dir = dir.path().join("dist");
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["release", "-o"])
+        .arg(&output_dir)
+        .output()?;
+
+    assert!(result.status.success());
+    assert!(output_dir.is_dir());
+    let archive = output_dir.join(format!("{name}.zip"));
+    assert_eq!(zip_names(&archive)?, vec!["fxmanifest.lua", "main.lua"]);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("fxmanifest.lua"))?,
+        "version '1.2.3'\n"
+    );
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("# Release Report"));
+    assert!(stdout.contains("- **Version:** `1.2.3` (unchanged)"));
+    assert!(stdout.contains("Success (archive written)"));
+    Ok(())
+}
+
+#[test]
+fn release_patch_bumps_before_packing() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let name = directory_name(dir.path())?;
+    write_file(&dir.path().join(".pack"), "*.lua\n")?;
+    write_file(&dir.path().join("fxmanifest.lua"), "version '1.2.3'\n")?;
+    write_file(&dir.path().join("main.lua"), "main")?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["release", "--patch"])
+        .output()?;
+
+    assert!(result.status.success());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("fxmanifest.lua"))?,
+        "version '1.2.4'\n"
+    );
+    let archive = dir.path().join(format!("{name}.zip"));
+    assert_eq!(
+        zip_file_contents(&archive, "fxmanifest.lua")?,
+        "version '1.2.4'\n"
+    );
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("- **Version:** `1.2.3` -> `1.2.4`"));
+    Ok(())
+}
+
+#[test]
+fn release_sha256_is_included_in_the_report() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let name = directory_name(dir.path())?;
+    write_file(&dir.path().join(".pack"), "*.lua\n")?;
+    write_file(&dir.path().join("fxmanifest.lua"), "version '1.2.3'\n")?;
+    write_file(&dir.path().join("main.lua"), "main")?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["release", "--sha256"])
+        .output()?;
+
+    assert!(result.status.success());
+    let checksum = sha256_hex(&dir.path().join(format!("{name}.zip")))?;
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains(&format!("- **SHA-256:** `{checksum}`")));
+    Ok(())
+}
+
+#[test]
+fn release_uses_manifest_parent_as_pack_input() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let resource = root.path().join("my-resource");
+    write_file(&resource.join(".pack"), "*.lua\n")?;
+    write_file(&resource.join("fxmanifest.lua"), "version = \"2.0.0\"\n")?;
+    write_file(&resource.join("server.lua"), "server")?;
+    let output_dir = root.path().join("dist");
+    fs::create_dir_all(&output_dir)?;
+
+    let result = trek()
+        .current_dir(root.path())
+        .args(["release", "--minor", "--output"])
+        .arg(&output_dir)
+        .args(["--manifest"])
+        .arg(resource.join("fxmanifest.lua"))
+        .output()?;
+
+    assert!(result.status.success());
+    let archive = output_dir.join("my-resource.zip");
+    assert_eq!(zip_names(&archive)?, vec!["fxmanifest.lua", "server.lua"]);
+    assert_eq!(
+        fs::read_to_string(resource.join("fxmanifest.lua"))?,
+        "version = \"2.1.0\"\n"
+    );
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("- **Version:** `2.0.0` -> `2.1.0`"));
+    assert!(stdout.contains("- **Output archive:**"));
+    Ok(())
+}
+
+#[test]
+fn release_rejects_conflicting_bump_flags() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let name = directory_name(dir.path())?;
+    write_file(&dir.path().join(".pack"), "*.lua\n")?;
+    write_file(&dir.path().join("fxmanifest.lua"), "version '1.2.3'\n")?;
+    write_file(&dir.path().join("main.lua"), "main")?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["release", "--patch", "--minor"])
+        .output()?;
+
+    assert!(!result.status.success());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("fxmanifest.lua"))?,
+        "version '1.2.3'\n"
+    );
+    assert!(!dir.path().join(format!("{name}.zip")).exists());
+    Ok(())
+}
+
+#[test]
+fn release_bump_failure_prints_report_and_exits_nonzero() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let name = directory_name(dir.path())?;
+    write_file(&dir.path().join(".pack"), "*.lua\n")?;
+    write_file(&dir.path().join("main.lua"), "main")?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["release", "--patch"])
+        .output()?;
+
+    assert!(!result.status.success());
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("# Release Report"));
+    assert!(stdout.contains("failed to read manifest"));
+    assert!(!dir.path().join(format!("{name}.zip")).exists());
+    Ok(())
+}
+
+#[test]
+fn release_pack_failure_prints_report_and_exits_nonzero() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let name = directory_name(dir.path())?;
+    write_file(&dir.path().join("fxmanifest.lua"), "version '1.0.0'\n")?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["release", "--patch"])
+        .output()?;
+
+    assert!(!result.status.success());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("fxmanifest.lua"))?,
+        "version '1.0.1'\n"
+    );
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("- **Version:** `1.0.0` -> `1.0.1`"));
+    assert!(stdout.contains("failed to read pattern file"));
+    assert!(!dir.path().join(format!("{name}.zip")).exists());
+    Ok(())
+}
+
+#[test]
+fn release_pack_validation_failure_reports_problems() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let name = directory_name(dir.path())?;
+    write_file(&dir.path().join(".pack"), "\n")?;
+    write_file(&dir.path().join("fxmanifest.lua"), "version '1.0.0'\n")?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["release", "--patch", "--sha256"])
+        .output()?;
+
+    assert!(!result.status.success());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("fxmanifest.lua"))?,
+        "version '1.0.1'\n"
+    );
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("- **Version:** `1.0.0` -> `1.0.1`"));
+    assert!(stdout.contains("**Status:** Failed: pack validation failed"));
+    assert!(stdout.contains("- **SHA-256:** not available"));
+    assert!(stdout.contains("## Problems"));
+    assert!(!dir.path().join(format!("{name}.zip")).exists());
+    Ok(())
+}
+
+#[test]
+fn release_fails_when_output_path_is_a_file() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    write_file(&dir.path().join(".pack"), "*.lua\n")?;
+    write_file(&dir.path().join("fxmanifest.lua"), "version '1.0.0'\n")?;
+    let output = dir.path().join("dist");
+    write_file(&output, "not a directory")?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["release", "-o"])
+        .arg(&output)
+        .output()?;
+
+    assert!(!result.status.success());
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("failed to create output directory"));
     Ok(())
 }
