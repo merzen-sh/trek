@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 
 /// Command-line interface for trek.
 #[derive(Debug, Parser)]
-#[command(name = "trek", about = "Archive tools", version)]
+#[command(name = "trek", about = "Archive and resource version tools", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -14,6 +14,8 @@ pub struct Cli {
 pub enum Command {
     /// Create a ZIP archive from .pack include patterns.
     Pack(PackArgs),
+    /// Show or bump the resource version in fxmanifest.lua.
+    Version(VersionArgs),
 }
 
 #[derive(Debug, Args)]
@@ -39,6 +41,43 @@ pub struct PackArgs {
     pub sha256: bool,
 }
 
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("bump")
+        .args(["patch", "minor", "major"])
+        .multiple(false)
+))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "command-line flags are naturally booleans"
+)]
+pub struct VersionArgs {
+    /// Bump the patch version.
+    #[arg(long)]
+    pub patch: bool,
+
+    /// Bump the minor version and reset patch.
+    #[arg(long)]
+    pub minor: bool,
+
+    /// Bump the major version and reset minor/patch.
+    #[arg(long)]
+    pub major: bool,
+
+    /// Print only the raw version for scripts and CI.
+    #[arg(long)]
+    pub ci: bool,
+
+    /// Path to the target fxmanifest.lua.
+    #[arg(
+        short = 'm',
+        long,
+        value_name = "PATH",
+        default_value = "fxmanifest.lua"
+    )]
+    pub manifest: PathBuf,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,15 +96,14 @@ mod tests {
             "--sha256",
         ])?;
 
-        match cli.command {
-            Command::Pack(args) => {
-                assert_eq!(args.input, PathBuf::from("src"));
-                assert_eq!(args.output, Some(PathBuf::from("files.zip")));
-                assert!(args.dry_run);
-                assert!(args.report);
-                assert!(args.sha256);
-            }
-        }
+        let Command::Pack(args) = cli.command else {
+            anyhow::bail!("expected pack command");
+        };
+        assert_eq!(args.input, PathBuf::from("src"));
+        assert_eq!(args.output, Some(PathBuf::from("files.zip")));
+        assert!(args.dry_run);
+        assert!(args.report);
+        assert!(args.sha256);
 
         Ok(())
     }
@@ -74,16 +112,59 @@ mod tests {
     fn defaults_input_to_current_directory() -> anyhow::Result<()> {
         let cli = Cli::try_parse_from(["trek", "pack"])?;
 
-        match cli.command {
-            Command::Pack(args) => {
-                assert_eq!(args.input, PathBuf::from("."));
-                assert_eq!(args.output, None);
-                assert!(!args.dry_run);
-                assert!(!args.report);
-                assert!(!args.sha256);
-            }
-        }
+        let Command::Pack(args) = cli.command else {
+            anyhow::bail!("expected pack command");
+        };
+        assert_eq!(args.input, PathBuf::from("."));
+        assert_eq!(args.output, None);
+        assert!(!args.dry_run);
+        assert!(!args.report);
+        assert!(!args.sha256);
 
         Ok(())
+    }
+
+    #[test]
+    fn parses_version_options() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from([
+            "trek",
+            "version",
+            "--patch",
+            "--ci",
+            "-m",
+            "resource/fxmanifest.lua",
+        ])?;
+
+        let Command::Version(args) = cli.command else {
+            anyhow::bail!("expected version command");
+        };
+        assert!(args.patch);
+        assert!(!args.minor);
+        assert!(!args.major);
+        assert!(args.ci);
+        assert_eq!(args.manifest, PathBuf::from("resource/fxmanifest.lua"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn version_defaults_to_local_manifest() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["trek", "version"])?;
+
+        let Command::Version(args) = cli.command else {
+            anyhow::bail!("expected version command");
+        };
+        assert!(!args.patch);
+        assert!(!args.minor);
+        assert!(!args.major);
+        assert!(!args.ci);
+        assert_eq!(args.manifest, PathBuf::from("fxmanifest.lua"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn version_rejects_multiple_bump_flags() {
+        assert!(Cli::try_parse_from(["trek", "version", "--patch", "--minor"]).is_err());
     }
 }

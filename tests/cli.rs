@@ -523,3 +523,162 @@ fn pack_rejects_missing_output_parent() -> Result<()> {
     assert!(stderr.contains("does not exist"));
     Ok(())
 }
+
+#[test]
+fn version_prints_current_without_modifying_manifest() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("fxmanifest.lua");
+    write_file(&manifest, "version '1.2.3'\n")?;
+
+    let result = trek().args(["version", "-m"]).arg(&manifest).output()?;
+
+    assert!(result.status.success());
+    assert_eq!(
+        String::from_utf8(result.stdout)?,
+        "Current version: 1.2.3\n"
+    );
+    assert_eq!(fs::read_to_string(&manifest)?, "version '1.2.3'\n");
+    Ok(())
+}
+
+#[test]
+fn version_ci_prints_raw_current_version() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("fxmanifest.lua");
+    write_file(&manifest, "version '1.2.3'\n")?;
+
+    let result = trek()
+        .args(["version", "--ci", "-m"])
+        .arg(&manifest)
+        .output()?;
+
+    assert!(result.status.success());
+    assert_eq!(String::from_utf8(result.stdout)?, "1.2.3\n");
+    Ok(())
+}
+
+#[test]
+fn version_bumps_patch_and_preserves_syntax() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("fxmanifest.lua");
+    write_file(&manifest, "version = \"1.2.3\"\n")?;
+
+    let result = trek()
+        .args(["version", "--patch", "-m"])
+        .arg(&manifest)
+        .output()?;
+
+    assert!(result.status.success());
+    assert_eq!(
+        String::from_utf8(result.stdout)?,
+        "Bumped version: 1.2.3 -> 1.2.4\n"
+    );
+    assert_eq!(fs::read_to_string(&manifest)?, "version = \"1.2.4\"\n");
+    Ok(())
+}
+
+#[test]
+fn version_ci_bumps_minor_and_preserves_syntax() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("fxmanifest.lua");
+    write_file(&manifest, "version(\"1.2.3\")\n")?;
+
+    let result = trek()
+        .args(["version", "--minor", "--ci", "-m"])
+        .arg(&manifest)
+        .output()?;
+
+    assert!(result.status.success());
+    assert_eq!(String::from_utf8(result.stdout)?, "1.3.0\n");
+    assert_eq!(fs::read_to_string(&manifest)?, "version(\"1.3.0\")\n");
+    Ok(())
+}
+
+#[test]
+fn version_bumps_major() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("fxmanifest.lua");
+    write_file(&manifest, "version '1.2.3'\n")?;
+
+    let result = trek()
+        .args(["version", "--major", "-m"])
+        .arg(&manifest)
+        .output()?;
+
+    assert!(result.status.success());
+    assert_eq!(fs::read_to_string(&manifest)?, "version '2.0.0'\n");
+    Ok(())
+}
+
+#[test]
+fn version_uses_default_manifest_path() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    write_file(&dir.path().join("fxmanifest.lua"), "version '1.2.3'\n")?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["version", "--ci"])
+        .output()?;
+
+    assert!(result.status.success());
+    assert_eq!(String::from_utf8(result.stdout)?, "1.2.3\n");
+    Ok(())
+}
+
+#[test]
+fn version_rejects_multiple_bump_flags() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("fxmanifest.lua");
+    write_file(&manifest, "version '1.2.3'\n")?;
+
+    let result = trek()
+        .args(["version", "--patch", "--minor", "-m"])
+        .arg(&manifest)
+        .output()?;
+
+    assert!(!result.status.success());
+    assert_eq!(fs::read_to_string(&manifest)?, "version '1.2.3'\n");
+    Ok(())
+}
+
+#[test]
+fn version_missing_manifest_fails() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("missing.lua");
+
+    let result = trek().args(["version", "-m"]).arg(&manifest).output()?;
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("failed to read manifest"));
+    Ok(())
+}
+
+#[test]
+fn version_invalid_version_fails() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("fxmanifest.lua");
+    write_file(&manifest, "version 'not-a-version'\n")?;
+
+    let result = trek().args(["version", "-m"]).arg(&manifest).output()?;
+
+    assert!(!result.status.success());
+    assert_eq!(fs::read_to_string(&manifest)?, "version 'not-a-version'\n");
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("invalid version"));
+    Ok(())
+}
+
+#[test]
+fn version_missing_declaration_fails() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let manifest = dir.path().join("fxmanifest.lua");
+    write_file(&manifest, "return {}\n")?;
+
+    let result = trek().args(["version", "-m"]).arg(&manifest).output()?;
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("no version declaration"));
+    Ok(())
+}
