@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 use anyhow::Result;
@@ -22,6 +23,13 @@ pub fn zip_names(path: &Path) -> Result<Vec<String>> {
         names.push(file.name()?.to_string());
     }
     Ok(names)
+}
+
+pub fn zip_file_contents(path: &Path, name: &str) -> Result<String> {
+    let mut archive = ZipArchive::new(fs::File::open(path)?)?;
+    let mut contents = String::new();
+    archive.by_name(name)?.read_to_string(&mut contents)?;
+    Ok(contents)
 }
 
 pub fn sha256_hex(path: &Path) -> Result<String> {

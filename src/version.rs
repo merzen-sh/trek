@@ -94,21 +94,34 @@ impl fmt::Display for SemVer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Bump {
+pub(crate) enum Bump {
     Patch,
     Minor,
     Major,
 }
 
 impl Bump {
-    fn from_args(args: &VersionArgs) -> Result<Option<Self>> {
-        match (args.patch, args.minor, args.major) {
+    pub(crate) fn from_flags(patch: bool, minor: bool, major: bool) -> Result<Option<Self>> {
+        match (patch, minor, major) {
             (false, false, false) => Ok(None),
             (true, false, false) => Ok(Some(Self::Patch)),
             (false, true, false) => Ok(Some(Self::Minor)),
             (false, false, true) => Ok(Some(Self::Major)),
             _ => bail!("only one of --patch, --minor, or --major may be used"),
         }
+    }
+}
+
+/// The version before and, when bumped, after a manifest update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VersionChange {
+    pub(crate) current: String,
+    pub(crate) next: Option<String>,
+}
+
+impl VersionChange {
+    pub(crate) fn resulting(&self) -> &str {
+        self.next.as_deref().unwrap_or(&self.current)
     }
 }
 
@@ -370,6 +383,28 @@ fn temporary_manifest_path(target: &Path, attempt: u32) -> Result<PathBuf> {
     Ok(target.with_file_name(temporary_name))
 }
 
+/// Read a manifest, optionally bump its version, and write it back atomically.
+///
+/// # Errors
+///
+/// Returns an error if the manifest cannot be read or written, no version
+/// declaration is found, the version is invalid, or a bump overflows.
+pub(crate) fn bump_manifest(manifest: &Path, bump: Option<Bump>) -> Result<VersionChange> {
+    let contents = fs::read_to_string(manifest)
+        .with_context(|| format!("failed to read manifest {}", manifest.display()))?;
+    let update = update_version(&contents, bump)
+        .with_context(|| format!("failed to process manifest {}", manifest.display()))?;
+
+    if let Some(updated) = &update.updated {
+        write_manifest(manifest, updated)?;
+    }
+
+    Ok(VersionChange {
+        current: update.current.to_string(),
+        next: update.next.map(|next| next.to_string()),
+    })
+}
+
 /// Execute the `version` subcommand.
 ///
 /// # Errors
@@ -377,28 +412,20 @@ fn temporary_manifest_path(target: &Path, attempt: u32) -> Result<PathBuf> {
 /// Returns an error if the manifest cannot be read or written, no version
 /// declaration is found, the version is invalid, or a bump overflows.
 pub fn run(args: &VersionArgs) -> Result<()> {
-    let contents = fs::read_to_string(&args.manifest)
-        .with_context(|| format!("failed to read manifest {}", args.manifest.display()))?;
-    let bump = Bump::from_args(args)
-        .with_context(|| format!("invalid version flags for {}", args.manifest.display()))?;
-    let update = update_version(&contents, bump)
-        .with_context(|| format!("failed to process manifest {}", args.manifest.display()))?;
+    let bump =
+        Bump::from_flags(args.patch, args.minor, args.major).context("invalid version flags")?;
+    let change = bump_manifest(&args.manifest, bump)?;
 
-    if let Some(updated) = &update.updated {
-        write_manifest(&args.manifest, updated)?;
-    }
-
-    print_version(update.current, update.next, args.ci)
+    print_version(&change, args.ci)
 }
 
-fn print_version(current: SemVer, next: Option<SemVer>, ci: bool) -> Result<()> {
+fn print_version(change: &VersionChange, ci: bool) -> Result<()> {
     let output = if ci {
-        let version = next.unwrap_or(current);
-        format!("{version}\n")
-    } else if let Some(next) = next {
-        format!("Bumped version: {current} -> {next}\n")
+        format!("{}\n", change.resulting())
+    } else if let Some(next) = change.next.as_deref() {
+        format!("Bumped version: {} -> {next}\n", change.current)
     } else {
-        format!("Current version: {current}\n")
+        format!("Current version: {}\n", change.current)
     };
 
     write_stdout(&output)
@@ -521,15 +548,10 @@ mod tests {
 
     #[test]
     fn rejects_multiple_bump_flags_from_args() {
-        let args = VersionArgs {
-            patch: true,
-            minor: true,
-            major: false,
-            ci: false,
-            manifest: PathBuf::from("fxmanifest.lua"),
-        };
-
-        assert!(Bump::from_args(&args).is_err());
+        assert!(Bump::from_flags(true, true, false).is_err());
+        assert!(Bump::from_flags(true, false, true).is_err());
+        assert!(Bump::from_flags(false, true, true).is_err());
+        assert!(Bump::from_flags(true, true, true).is_err());
     }
 
     #[test]
