@@ -17,9 +17,9 @@ use crate::pack::{EntryKind, Plan};
 ///
 /// # Errors
 ///
-/// Returns an error if the plan has problems, the output or its temporary
-/// sibling collides with an input, the output directory is missing, or a
-/// source file cannot be read or written.
+/// Returns an error if the plan has problems, the output exists but is not a
+/// ZIP archive, the output or its temporary sibling collides with an input,
+/// the output directory is missing, or a source file cannot be read or written.
 pub fn write_zip(plan: &Plan, output: &Path) -> Result<()> {
     if plan.has_problems() {
         bail!(
@@ -67,15 +67,41 @@ pub fn write_zip(plan: &Plan, output: &Path) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error if the output is a directory, its parent directory is
-/// missing or not a directory, or the output path is a planned source file.
+/// Returns an error if the output is an existing non-ZIP file, a directory,
+/// its parent directory is missing or not a directory, or the output path is
+/// a planned source file.
 pub(crate) fn validate_output(plan: &Plan, output: &Path) -> Result<()> {
+    ensure_replaceable(output)?;
+
     let output_path = output_identity(output)?;
     if output_path.is_dir() {
         bail!("output archive {} is a directory", output.display());
     }
 
     ensure_not_source(plan, &output_path, "output archive", output)
+}
+
+fn ensure_replaceable(output: &Path) -> Result<()> {
+    let Ok(metadata) = fs::symlink_metadata(output) else {
+        return Ok(());
+    };
+
+    if metadata.file_type().is_file() && !is_zip_archive(output) {
+        bail!(
+            "refusing to overwrite {}: it exists and is not a ZIP archive; \
+             remove it or choose another --output",
+            output.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn is_zip_archive(path: &Path) -> bool {
+    File::open(path)
+        .ok()
+        .and_then(|file| zip::ZipArchive::new(file).ok())
+        .is_some()
 }
 
 /// Use the canonical path for non-symlink outputs and the lexical path for
@@ -217,6 +243,13 @@ mod tests {
     use crate::pack::{ArchiveEntry, Problem};
     use crate::test_support::{plan_for, write_file};
 
+    fn write_empty_archive(path: &Path) -> Result<()> {
+        let mut writer = ZipWriter::new(File::create(path)?);
+        writer.add_directory("old/", SimpleFileOptions::default())?;
+        writer.finish()?;
+        Ok(())
+    }
+
     #[test]
     fn creates_archive_with_preserved_directory_structure() -> Result<()> {
         let dir = tempfile::tempdir()?;
@@ -268,7 +301,8 @@ mod tests {
     fn failed_write_preserves_existing_archive() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let output = dir.path().join("out.zip");
-        fs::write(&output, b"old archive")?;
+        write_empty_archive(&output)?;
+        let original = fs::read(&output)?;
         let source = dir.path().join("source-directory");
         fs::create_dir(&source)?;
         let plan = Plan {
@@ -280,7 +314,8 @@ mod tests {
         };
 
         assert!(write_zip(&plan, &output).is_err());
-        assert_eq!(fs::read(&output)?, b"old archive".as_slice());
+        assert!(is_zip_archive(&output));
+        assert_eq!(fs::read(&output)?, original);
         assert_eq!(
             fs::read_dir(dir.path())?
                 .filter_map(Result::ok)
@@ -288,6 +323,24 @@ mod tests {
                 .count(),
             0
         );
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_to_overwrite_non_zip_output() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let output = dir.path().join("notes.txt");
+        write_file(&output, "keep me")?;
+        write_file(&dir.path().join("a.txt"), "hello")?;
+        let plan = plan_for(dir.path(), &["a.txt"], &output);
+
+        let error = match validate_output(&plan, &output) {
+            Ok(()) => anyhow::bail!("expected an error"),
+            Err(error) => error,
+        };
+
+        assert!(format!("{error:#}").contains("not a ZIP archive"));
+        assert_eq!(fs::read_to_string(&output)?, "keep me");
         Ok(())
     }
 
@@ -405,14 +458,14 @@ mod tests {
     #[test]
     fn planned_source_collision_is_detected() -> Result<()> {
         let dir = tempfile::tempdir()?;
-        let source = dir.path().join("a.txt");
-        write_file(&source, "hello")?;
+        let source = dir.path().join("a.zip");
+        write_empty_archive(&source)?;
         let plan = Plan {
             entries: vec![ArchiveEntry {
-                path: "a.txt".into(),
+                path: "a.zip".into(),
                 kind: EntryKind::File {
                     source: source.clone(),
-                    size: 5,
+                    size: 0,
                 },
             }],
             problems: Vec::new(),
@@ -423,7 +476,7 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(format!("{error:#}").contains("also packed as `a.txt`"));
+        assert!(format!("{error:#}").contains("also packed as `a.zip`"));
         Ok(())
     }
 }

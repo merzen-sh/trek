@@ -92,16 +92,17 @@ fn pack_excludes_pattern_file_and_output_archive() -> Result<()> {
     write_file(&dir.path().join(".pack"), "**/*\n")?;
     write_file(&dir.path().join("a.txt"), "hello")?;
     let output = dir.path().join("out.zip");
-    write_file(&output, "old archive")?;
 
-    let result = trek()
-        .args(["pack", "--input"])
-        .arg(dir.path())
-        .args(["--output"])
-        .arg(&output)
-        .output()?;
+    for _ in 0..2 {
+        let result = trek()
+            .args(["pack", "--input"])
+            .arg(dir.path())
+            .args(["--output"])
+            .arg(&output)
+            .output()?;
+        assert!(result.status.success());
+    }
 
-    assert!(result.status.success());
     assert_eq!(zip_names(&output)?, vec!["a.txt"]);
     Ok(())
 }
@@ -255,6 +256,53 @@ fn pack_rerun_excludes_previous_output() -> Result<()> {
     }
 
     assert_eq!(zip_names(&output)?, vec!["a.txt"]);
+    Ok(())
+}
+
+#[test]
+fn pack_refuses_to_overwrite_non_zip_output() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    write_file(&dir.path().join(".pack"), "*.txt\n")?;
+    let output = dir.path().join("a.txt");
+    write_file(&output, "IMPORTANT")?;
+    write_file(&dir.path().join("b.txt"), "second")?;
+
+    let result = trek()
+        .args(["pack", "--input"])
+        .arg(dir.path())
+        .args(["--output"])
+        .arg(&output)
+        .output()?;
+
+    assert!(!result.status.success());
+    assert_eq!(fs::read_to_string(&output)?, "IMPORTANT");
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("not a ZIP archive"));
+    Ok(())
+}
+
+#[test]
+fn pack_dry_run_refuses_to_overwrite_non_zip_output() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    write_file(&dir.path().join(".pack"), "*.txt\n")?;
+    let output = dir.path().join("a.txt");
+    write_file(&output, "IMPORTANT")?;
+    write_file(&dir.path().join("b.txt"), "second")?;
+
+    let result = trek()
+        .args(["pack", "--input"])
+        .arg(dir.path())
+        .args(["--output"])
+        .arg(&output)
+        .arg("--dry-run")
+        .arg("--report")
+        .output()?;
+
+    assert!(!result.status.success());
+    assert_eq!(fs::read_to_string(&output)?, "IMPORTANT");
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("- **Status:** Failed:"));
+    assert!(stdout.contains("not a ZIP archive"));
     Ok(())
 }
 
