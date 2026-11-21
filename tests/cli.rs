@@ -5,7 +5,7 @@ use anyhow::Result;
 
 mod common;
 
-use common::{write_file, zip_names};
+use common::{sha256_hex, write_file, zip_names};
 
 fn trek() -> Command {
     Command::new(env!("CARGO_BIN_EXE_trek"))
@@ -151,6 +151,100 @@ fn pack_dry_run_report_prints_markdown_without_writing() -> Result<()> {
     assert!(stdout.contains("- **Mode:** Dry run"));
     assert!(stdout.contains("| `main.lua` | 4 |"));
     assert!(stdout.contains("Success (dry run; archive not written)"));
+    assert!(!stdout.contains("SHA-256"));
+    Ok(())
+}
+
+#[test]
+fn pack_sha256_prints_checksum() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    write_file(&dir.path().join(".pack"), "*.txt\n")?;
+    write_file(&dir.path().join("a.txt"), "hello")?;
+    let output = dir.path().join("out.zip");
+
+    let result = trek()
+        .args(["pack", "--input"])
+        .arg(dir.path())
+        .args(["--output"])
+        .arg(&output)
+        .arg("--sha256")
+        .output()?;
+
+    assert!(result.status.success());
+    let expected = sha256_hex(&output)?;
+    let stdout = String::from_utf8(result.stdout)?;
+    assert_eq!(stdout.matches("SHA-256:").count(), 1);
+    assert!(stdout.contains(&format!("SHA-256: {expected}")));
+    Ok(())
+}
+
+#[test]
+fn pack_sha256_report_includes_checksum() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    write_file(&dir.path().join(".pack"), "*.txt\n")?;
+    write_file(&dir.path().join("a.txt"), "hello")?;
+    let output = dir.path().join("out.zip");
+
+    let result = trek()
+        .args(["pack", "--input"])
+        .arg(dir.path())
+        .args(["--output"])
+        .arg(&output)
+        .arg("--sha256")
+        .arg("--report")
+        .output()?;
+
+    assert!(result.status.success());
+    let expected = sha256_hex(&output)?;
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains(&format!("- **SHA-256:** `{expected}`")));
+    Ok(())
+}
+
+#[test]
+fn pack_sha256_dry_run_report_reports_unavailable() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    write_file(&dir.path().join(".pack"), "*.txt\n")?;
+    write_file(&dir.path().join("a.txt"), "hello")?;
+    let output = dir.path().join("out.zip");
+
+    let result = trek()
+        .args(["pack", "--input"])
+        .arg(dir.path())
+        .args(["--output"])
+        .arg(&output)
+        .arg("--dry-run")
+        .arg("--sha256")
+        .arg("--report")
+        .output()?;
+
+    assert!(result.status.success());
+    assert!(!output.exists());
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("- **SHA-256:** not available (dry run)"));
+    Ok(())
+}
+
+#[test]
+fn pack_sha256_dry_run_preview_reports_unavailable() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    write_file(&dir.path().join(".pack"), "*.txt\n")?;
+    write_file(&dir.path().join("a.txt"), "hello")?;
+    let output = dir.path().join("out.zip");
+
+    let result = trek()
+        .args(["pack", "--input"])
+        .arg(dir.path())
+        .args(["--output"])
+        .arg(&output)
+        .arg("--dry-run")
+        .arg("--sha256")
+        .output()?;
+
+    assert!(result.status.success());
+    assert!(!output.exists());
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("SHA-256: not available (dry run)"));
     Ok(())
 }
 

@@ -33,6 +33,10 @@ pub struct PackArgs {
     /// Print a Markdown report to stdout.
     #[arg(long)]
     pub report: bool,
+
+    /// Print the SHA-256 checksum of the written archive.
+    #[arg(long)]
+    pub sha256: bool,
 }
 
 #[cfg(test)]
@@ -50,6 +54,7 @@ mod tests {
             "files.zip",
             "--dry-run",
             "--report",
+            "--sha256",
         ])?;
 
         match cli.command {
@@ -58,6 +63,7 @@ mod tests {
                 assert_eq!(args.output, Some(PathBuf::from("files.zip")));
                 assert!(args.dry_run);
                 assert!(args.report);
+                assert!(args.sha256);
             }
         }
 
@@ -74,6 +80,7 @@ mod tests {
                 assert_eq!(args.output, None);
                 assert!(!args.dry_run);
                 assert!(!args.report);
+                assert!(!args.sha256);
             }
         }
 

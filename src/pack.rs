@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use glob::{MatchOptions, Pattern};
 
-use crate::archive::{validate_output, write_zip};
+use crate::archive::{sha256_file, validate_output, write_zip};
 use crate::cli::PackArgs;
 use crate::manifest::{Manifest, validate_pattern};
-use crate::report::{Outcome, render_markdown, render_preview};
+use crate::report::{Checksum, Outcome, render_markdown, render_preview};
 
 /// The kind of item represented by an archive entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,8 +375,8 @@ pub(crate) fn default_output(input: &Path) -> PathBuf {
 /// # Errors
 ///
 /// Returns an error if the pattern file cannot be read, validation fails, the
-/// output collides with the pattern file, the archive cannot be written, or
-/// output cannot be printed.
+/// output collides with the pattern file, the archive cannot be written or
+/// hashed, or output cannot be printed.
 pub fn run(args: &PackArgs) -> Result<()> {
     let pattern_file = args.input.join(".pack");
     let manifest = Manifest::read(&pattern_file)?;
@@ -387,6 +387,7 @@ pub fn run(args: &PackArgs) -> Result<()> {
     let plan = build_plan(&manifest, &output);
 
     let mut failure = None;
+    let mut checksum = None;
 
     if plan.has_problems() {
         failure = Some(validation_error(&plan));
@@ -398,6 +399,11 @@ pub fn run(args: &PackArgs) -> Result<()> {
         }
     } else if let Err(error) = write_zip(&plan, &output) {
         failure = Some(error);
+    } else if args.sha256 {
+        match sha256_file(&output) {
+            Ok(hash) => checksum = Some(hash),
+            Err(error) => failure = Some(error),
+        }
     }
 
     let failure_message = failure.as_ref().map(|error| format!("{error:#}"));
@@ -411,11 +417,25 @@ pub fn run(args: &PackArgs) -> Result<()> {
             None => Outcome::Written,
         }
     };
+    let checksum_display = if args.sha256 {
+        Some(match checksum.as_deref() {
+            Some(checksum) => Checksum::Value(checksum),
+            None => Checksum::Unavailable,
+        })
+    } else {
+        None
+    };
 
     if args.report {
-        write_stdout(&render_markdown(&manifest, &plan, &output, outcome))?;
+        write_stdout(&render_markdown(
+            &manifest,
+            &plan,
+            &output,
+            outcome,
+            checksum_display,
+        ))?;
     } else if args.dry_run {
-        write_stdout(&render_preview(&manifest, &plan, &output))?;
+        write_stdout(&render_preview(&manifest, &plan, &output, checksum_display))?;
     } else if failure.is_none() {
         let summary = format!(
             "Created {} ({} files, {} directories, {} bytes)\n",
@@ -425,6 +445,9 @@ pub fn run(args: &PackArgs) -> Result<()> {
             plan.total_size()
         );
         write_stdout(&summary)?;
+        if let Some(checksum) = &checksum {
+            write_stdout(&format!("SHA-256: {checksum}\n"))?;
+        }
     }
 
     match failure {
@@ -778,6 +801,7 @@ mod tests {
             output: Some(output.clone()),
             dry_run: true,
             report: false,
+            sha256: false,
         };
 
         run(&args)?;
@@ -796,6 +820,7 @@ mod tests {
             output: Some(output.clone()),
             dry_run: false,
             report: false,
+            sha256: false,
         };
 
         assert!(run(&args).is_err());
@@ -814,6 +839,7 @@ mod tests {
             output: Some(pattern_file.clone()),
             dry_run: false,
             report: false,
+            sha256: false,
         };
 
         assert!(run(&args).is_err());
@@ -830,6 +856,7 @@ mod tests {
             output: Some(output.clone()),
             dry_run: false,
             report: false,
+            sha256: false,
         };
 
         assert!(run(&args).is_err());
@@ -848,6 +875,7 @@ mod tests {
             output: Some(output.clone()),
             dry_run: false,
             report: false,
+            sha256: false,
         };
 
         run(&args)?;

@@ -28,6 +28,26 @@ impl Outcome<'_> {
     }
 }
 
+/// SHA-256 checksum information to include in a report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checksum<'a> {
+    /// The checksum was requested, but no archive was written.
+    Unavailable,
+    /// The checksum of the written archive.
+    Value(&'a str),
+}
+
+impl Checksum<'_> {
+    #[must_use]
+    fn label(self, dry_run: bool) -> String {
+        match self {
+            Self::Value(checksum) => format!("`{checksum}`"),
+            Self::Unavailable if dry_run => "not available (dry run)".into(),
+            Self::Unavailable => "not available".into(),
+        }
+    }
+}
+
 /// Render a Markdown report for a completed or failed pack operation.
 #[must_use]
 pub fn render_markdown(
@@ -35,6 +55,7 @@ pub fn render_markdown(
     plan: &Plan,
     output: &Path,
     outcome: Outcome<'_>,
+    checksum: Option<Checksum<'_>>,
 ) -> String {
     let mut report = String::new();
 
@@ -48,6 +69,10 @@ pub fn render_markdown(
     let _ = writeln!(report, "- **Pattern file:** `{}`", manifest.path.display());
     let _ = writeln!(report, "- **Patterns:** {}", manifest.patterns.len());
     let _ = writeln!(report, "- **Output archive:** `{}`", output.display());
+    if let Some(checksum) = checksum {
+        let dry_run = matches!(outcome, Outcome::DryRun { .. });
+        let _ = writeln!(report, "- **SHA-256:** {}", checksum.label(dry_run));
+    }
     let _ = writeln!(
         report,
         "- **Mode:** {}",
@@ -115,7 +140,12 @@ pub fn render_markdown(
 
 /// Render the plain-text preview printed by `--dry-run` without `--report`.
 #[must_use]
-pub fn render_preview(manifest: &Manifest, plan: &Plan, output: &Path) -> String {
+pub fn render_preview(
+    manifest: &Manifest,
+    plan: &Plan,
+    output: &Path,
+    checksum: Option<Checksum<'_>>,
+) -> String {
     let mut preview = String::new();
 
     let _ = writeln!(
@@ -128,6 +158,9 @@ pub fn render_preview(manifest: &Manifest, plan: &Plan, output: &Path) -> String
         manifest.path.display()
     );
     let _ = writeln!(preview, "Archive `{}` was not written.", output.display());
+    if let Some(checksum) = checksum {
+        let _ = writeln!(preview, "SHA-256: {}", checksum.label(true));
+    }
 
     if plan.entries.is_empty() {
         let _ = writeln!(preview, "No entries would be included.");
@@ -222,6 +255,7 @@ mod tests {
             &sample_plan(),
             Path::new("/tmp/out.zip"),
             Outcome::DryRun { error: None },
+            None,
         );
 
         assert!(report.contains("# Pack Report"));
@@ -246,6 +280,7 @@ mod tests {
             &sample_plan(),
             Path::new("/tmp/out.zip"),
             Outcome::Written,
+            None,
         );
 
         assert!(report.contains("- **Mode:** Create archive"));
@@ -261,6 +296,7 @@ mod tests {
             Outcome::DryRun {
                 error: Some("pack validation failed"),
             },
+            None,
         );
 
         assert!(report.contains("- **Mode:** Dry run"));
@@ -284,6 +320,7 @@ mod tests {
             Outcome::Failed {
                 error: "pack validation failed",
             },
+            None,
         );
 
         assert!(report.contains("- **Status:** Failed: pack validation failed"));
@@ -297,6 +334,7 @@ mod tests {
             &sample_manifest(),
             &sample_plan(),
             Path::new("/tmp/out.zip"),
+            None,
         );
 
         assert!(
@@ -319,10 +357,77 @@ mod tests {
             }],
         };
 
-        let preview = render_preview(&sample_manifest(), &plan, Path::new("/tmp/out.zip"));
+        let preview = render_preview(&sample_manifest(), &plan, Path::new("/tmp/out.zip"), None);
 
         assert!(preview.contains("Problems:"));
         assert!(preview.contains("missing.txt: not found"));
+    }
+
+    #[test]
+    fn report_includes_sha256_checksum() {
+        let report = render_markdown(
+            &sample_manifest(),
+            &sample_plan(),
+            Path::new("/tmp/out.zip"),
+            Outcome::Written,
+            Some(Checksum::Value("abc123")),
+        );
+
+        assert!(report.contains("- **SHA-256:** `abc123`"));
+    }
+
+    #[test]
+    fn report_marks_checksum_unavailable_for_dry_run() {
+        let report = render_markdown(
+            &sample_manifest(),
+            &sample_plan(),
+            Path::new("/tmp/out.zip"),
+            Outcome::DryRun { error: None },
+            Some(Checksum::Unavailable),
+        );
+
+        assert!(report.contains("- **SHA-256:** not available (dry run)"));
+    }
+
+    #[test]
+    fn report_omits_checksum_when_not_requested() {
+        let report = render_markdown(
+            &sample_manifest(),
+            &sample_plan(),
+            Path::new("/tmp/out.zip"),
+            Outcome::Written,
+            None,
+        );
+
+        assert!(!report.contains("SHA-256"));
+    }
+
+    #[test]
+    fn report_marks_checksum_unavailable_on_failure() {
+        let report = render_markdown(
+            &sample_manifest(),
+            &sample_plan(),
+            Path::new("/tmp/out.zip"),
+            Outcome::Failed {
+                error: "hashing failed",
+            },
+            Some(Checksum::Unavailable),
+        );
+
+        assert!(report.contains("- **SHA-256:** not available"));
+        assert!(report.contains("- **Status:** Failed: hashing failed"));
+    }
+
+    #[test]
+    fn preview_marks_checksum_unavailable_for_dry_run() {
+        let preview = render_preview(
+            &sample_manifest(),
+            &sample_plan(),
+            Path::new("/tmp/out.zip"),
+            Some(Checksum::Unavailable),
+        );
+
+        assert!(preview.contains("SHA-256: not available (dry run)"));
     }
 
     #[test]

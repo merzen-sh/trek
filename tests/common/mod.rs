@@ -1,7 +1,9 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
+use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 pub fn write_file(path: &Path, contents: &str) -> Result<()> {
@@ -20,4 +22,13 @@ pub fn zip_names(path: &Path) -> Result<Vec<String>> {
         names.push(file.name()?.to_string());
     }
     Ok(names)
+}
+
+pub fn sha256_hex(path: &Path) -> Result<String> {
+    let digest = Sha256::digest(fs::read(path)?);
+    let mut checksum = String::with_capacity(digest.len() * 2);
+    for &byte in &digest {
+        let _ = write!(checksum, "{byte:02x}");
+    }
+    Ok(checksum)
 }
