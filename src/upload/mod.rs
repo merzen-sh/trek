@@ -1,8 +1,8 @@
 //! Optional CFX asset upload support.
 //!
 //! This ports the original `asset-upload` TypeScript scripts: `trek upload`
-//! publishes `dist/*.zip` to the CFX portal, and `trek upload --refresh-cookie`
-//! validates the forum cookie without uploading anything.
+//! publishes a ZIP from `--asset-path` (default `dist`) to the CFX portal, and
+//! `trek upload --refresh-cookie` validates the forum cookie without uploading.
 
 mod api;
 mod browser;
@@ -27,16 +27,17 @@ const PACK_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Execute the `upload` subcommand.
 ///
-/// The command reads `CFX_FORUM_COOKIE` and the optional `ZIP_FILE` and
-/// `VERSION` environment variables. `--asset-name` defaults to the current
-/// folder name. With `--refresh-cookie`, only `CFX_FORUM_COOKIE` is required.
+/// The command reads only `CFX_FORUM_COOKIE` from the environment.
+/// `--asset-path` defaults to `dist`, `--asset-name` defaults to the current
+/// folder name, and `--zip-file` and `--version` override the selected ZIP and
+/// inferred version. With `--refresh-cookie`, only `CFX_FORUM_COOKIE` is used.
 ///
 /// # Errors
 ///
-/// Returns an error if `CFX_FORUM_COOKIE` is missing, `--asset-name` is empty,
-/// the current folder name cannot be determined or is not valid UTF-8, the
-/// browser or CFX portal cannot be reached, the ZIP cannot be read, the upload
-/// fails, or the generated pack cannot be downloaded.
+/// Returns an error if `CFX_FORUM_COOKIE` is missing, an upload option is
+/// empty, the current folder name cannot be determined or is not valid UTF-8,
+/// the asset directory or ZIP cannot be read, the browser or CFX portal cannot
+/// be reached, the upload fails, or the generated pack cannot be downloaded.
 pub fn run(args: &UploadArgs) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -49,26 +50,41 @@ pub fn run(args: &UploadArgs) -> Result<()> {
     }
 
     let current_dir = std::env::current_dir().context("failed to resolve current directory")?;
-    let config = UploadConfig::from_args(args.asset_name.as_deref(), &current_dir)?;
-    runtime.block_on(upload(config, &current_dir))
+    let config = UploadConfig::from_args(args, &current_dir)?;
+    runtime.block_on(upload(config))
 }
 
 struct UploadConfig {
     forum_cookie: String,
     asset_name: String,
+    asset_path: PathBuf,
     zip_file: Option<String>,
     version: Option<String>,
 }
 
 impl UploadConfig {
-    fn from_args(asset_name: Option<&str>, current_dir: &Path) -> Result<Self> {
+    fn from_args(args: &UploadArgs, current_dir: &Path) -> Result<Self> {
         Ok(Self {
             forum_cookie: required_env("CFX_FORUM_COOKIE", "CFX_FORUM_COOKIE not set")?,
-            asset_name: resolve_asset_name(asset_name, current_dir)?,
-            zip_file: optional_env("ZIP_FILE"),
-            version: optional_env("VERSION"),
+            asset_name: resolve_asset_name(args.asset_name.as_deref(), current_dir)?,
+            asset_path: resolve_asset_path(&args.asset_path, current_dir),
+            zip_file: resolve_optional(args.zip_file.as_deref(), "--zip-file")?,
+            version: resolve_optional(args.version.as_deref(), "--version")?,
         })
     }
+}
+
+fn resolve_asset_path(requested: &Path, current_dir: &Path) -> PathBuf {
+    current_dir.join(requested)
+}
+
+fn resolve_optional(value: Option<&str>, flag: &str) -> Result<Option<String>> {
+    value
+        .map(|value| match value.trim() {
+            "" => bail!("{flag} must not be empty"),
+            trimmed => Ok(trimmed.to_string()),
+        })
+        .transpose()
 }
 
 fn resolve_asset_name(requested: Option<&str>, current_dir: &Path) -> Result<String> {
@@ -106,12 +122,11 @@ async fn refresh_cookie(forum_cookie: &str) -> Result<()> {
     close
 }
 
-async fn upload(config: UploadConfig, current_dir: &Path) -> Result<()> {
-    let dist = current_dir.join("dist");
-    let zip = SelectedZip::select(&dist, config.zip_file.as_deref())?;
+async fn upload(config: UploadConfig) -> Result<()> {
+    let zip = SelectedZip::select(&config.asset_path, config.zip_file.as_deref())?;
 
     let session = BrowserSession::launch().await?;
-    let result = upload_with_session(&session, &config, &zip, &dist).await;
+    let result = upload_with_session(&session, &config, &zip).await;
     let close = session.close().await;
     result?;
     close
@@ -121,20 +136,14 @@ async fn upload_with_session(
     session: &BrowserSession,
     config: &UploadConfig,
     zip: &SelectedZip,
-    dist: &Path,
 ) -> Result<()> {
     let cookie = session.login(&config.forum_cookie).await?;
     let api = Api::new(&cookie)?;
     let asset_id = api.find_asset_id(&config.asset_name).await?;
-    let metadata = fs::metadata(&zip.path)
-        .with_context(|| format!("failed to read {}", zip.path.display()))?;
-    let total_size = metadata.len();
+    let total_size = zip.size;
     let original_file_name = file_name(&zip.name);
     let chunk_count = total_size.div_ceil(CHUNK_SIZE);
-    let version = config
-        .version
-        .clone()
-        .unwrap_or_else(|| derive_version(&zip.name));
+    let version = resolve_version(config.version.as_deref(), &zip.name);
 
     println!("Uploading {original_file_name} ({total_size} bytes, {chunk_count} chunks)");
 
@@ -170,7 +179,7 @@ async fn upload_with_session(
     println!("Pack ID: {pack_id}");
 
     let download_url = api.pack_download_url(asset_id, version_id, pack_id).await?;
-    let output = dist.join(pack_file_name(&zip.name));
+    let output = config.asset_path.join(pack_file_name(&zip.name));
     println!("Downloading pack...");
     api.download(&download_url, &output).await?;
     println!("Pack saved to: {}", output.display());
@@ -284,18 +293,21 @@ async fn wait_for_pack(api: &Api, asset_id: i64, version_id: i64) -> Result<i64>
 struct SelectedZip {
     name: String,
     path: PathBuf,
+    size: u64,
 }
 
 impl SelectedZip {
-    fn select(dist: &Path, requested: Option<&str>) -> Result<Self> {
+    fn select(asset_path: &Path, requested: Option<&str>) -> Result<Self> {
         let name = match requested {
             Some(name) => name.to_string(),
-            None => first_zip(dist)?,
+            None => first_zip(asset_path)?,
         };
-        Ok(Self {
-            path: dist.join(&name),
-            name,
-        })
+        let path = asset_path.join(&name);
+        let size = fs::metadata(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?
+            .len();
+
+        Ok(Self { name, path, size })
     }
 }
 
@@ -303,20 +315,20 @@ impl SelectedZip {
     clippy::case_sensitive_file_extension_comparisons,
     reason = "the original script matches lowercase `.zip` only"
 )]
-fn first_zip(dist: &Path) -> Result<String> {
-    let entries = fs::read_dir(dist)
-        .with_context(|| format!("failed to read directory {}", dist.display()))?;
+fn first_zip(asset_path: &Path) -> Result<String> {
+    let entries = fs::read_dir(asset_path)
+        .with_context(|| format!("failed to read directory {}", asset_path.display()))?;
 
     for entry in entries {
         let entry =
-            entry.with_context(|| format!("failed to read directory {}", dist.display()))?;
+            entry.with_context(|| format!("failed to read directory {}", asset_path.display()))?;
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.ends_with(".zip") {
             return Ok(name);
         }
     }
 
-    bail!("No .zip file found in dist/")
+    bail!("No .zip file found in {}", asset_path.display())
 }
 
 fn file_name(path: &str) -> String {
@@ -332,6 +344,10 @@ fn strip_zip_suffix(name: &str) -> &str {
 
 fn pack_file_name(zip_name: &str) -> String {
     format!("{}.pack.zip", strip_zip_suffix(&file_name(zip_name)))
+}
+
+fn resolve_version(requested: Option<&str>, zip_name: &str) -> String {
+    requested.map_or_else(|| derive_version(&file_name(zip_name)), str::to_owned)
 }
 
 /// Derive the version from a ZIP name using the original `index.ts` regex.
@@ -429,6 +445,43 @@ mod tests {
     }
 
     #[test]
+    fn resolves_asset_paths() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let absolute = dir.path().join("assets");
+
+        assert_eq!(
+            resolve_asset_path(Path::new("dist"), dir.path()),
+            dir.path().join("dist")
+        );
+        assert_eq!(resolve_asset_path(&absolute, dir.path()), absolute);
+        Ok(())
+    }
+
+    #[test]
+    fn normalizes_optional_upload_values() -> Result<()> {
+        assert_eq!(resolve_optional(None, "--zip-file")?, None);
+        assert_eq!(
+            resolve_optional(Some(" custom.zip "), "--zip-file")?,
+            Some(String::from("custom.zip"))
+        );
+        assert!(resolve_optional(Some("   "), "--version").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn resolves_versions_from_the_selected_file_name() {
+        assert_eq!(
+            resolve_version(Some("9.9.9"), "builds/trek-core-1.2.3/assets.zip"),
+            "9.9.9"
+        );
+        assert_eq!(
+            resolve_version(None, "builds/trek-core-1.2.3/assets.zip"),
+            "assets"
+        );
+        assert_eq!(resolve_version(None, "builds/trek-core-1.2.3.zip"), "1.2.3");
+    }
+
+    #[test]
     fn finds_duplicate_versions_by_exact_name() {
         let versions = vec![version(1, "1.2.3"), version(2, "1.2.4")];
 
@@ -449,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn selects_the_first_zip_in_dist() -> Result<()> {
+    fn selects_the_first_zip_in_asset_path() -> Result<()> {
         let dir = tempfile::tempdir()?;
         write_file(&dir.path().join("notes.txt"), "notes")?;
         write_file(&dir.path().join("trek-core-1.2.3.zip"), "zip")?;
@@ -459,22 +512,27 @@ mod tests {
     }
 
     #[test]
-    fn reports_when_dist_has_no_zip() -> Result<()> {
+    fn reports_when_asset_path_has_no_zip() -> Result<()> {
         let dir = tempfile::tempdir()?;
         write_file(&dir.path().join("notes.txt"), "notes")?;
 
         let error = first_zip(dir.path()).expect_err("expected a missing ZIP error");
-        assert_eq!(error.to_string(), "No .zip file found in dist/");
+        assert_eq!(
+            error.to_string(),
+            format!("No .zip file found in {}", dir.path().display())
+        );
         Ok(())
     }
 
     #[test]
     fn selected_zip_uses_the_requested_name() -> Result<()> {
         let dir = tempfile::tempdir()?;
+        write_file(&dir.path().join("custom.zip"), "zip")?;
         let selected = SelectedZip::select(dir.path(), Some("custom.zip"))?;
 
         assert_eq!(selected.name, "custom.zip");
         assert_eq!(selected.path, dir.path().join("custom.zip"));
+        assert_eq!(selected.size, 3);
         Ok(())
     }
 
