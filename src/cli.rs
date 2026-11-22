@@ -18,6 +18,12 @@ pub enum Command {
     Version(VersionArgs),
     /// Bump the resource version and create a release archive.
     Release(ReleaseArgs),
+    /// Upload a packed asset to the CFX portal.
+    ///
+    /// Reads `CFX_FORUM_COOKIE` and `ASSET_NAME`, plus optional `ZIP_FILE` and
+    /// `VERSION`. ZIP files are selected from `dist/`.
+    #[cfg(feature = "asset-upload")]
+    Upload(UploadArgs),
 }
 
 #[derive(Debug, Args)]
@@ -119,6 +125,14 @@ pub struct ReleaseArgs {
     /// Include the archive's SHA-256 checksum in the report.
     #[arg(long)]
     pub sha256: bool,
+}
+
+#[cfg(feature = "asset-upload")]
+#[derive(Debug, Args)]
+pub struct UploadArgs {
+    /// Validate the CFX forum cookie and portal login without uploading.
+    #[arg(long)]
+    pub refresh_cookie: bool,
 }
 
 #[cfg(test)]
@@ -257,5 +271,18 @@ mod tests {
     #[test]
     fn release_rejects_multiple_bump_flags() {
         assert!(Cli::try_parse_from(["trek", "release", "--patch", "--major"]).is_err());
+    }
+
+    #[cfg(feature = "asset-upload")]
+    #[test]
+    fn parses_upload_options() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["trek", "upload", "--refresh-cookie"])?;
+
+        let Command::Upload(args) = cli.command else {
+            anyhow::bail!("expected upload command");
+        };
+        assert!(args.refresh_cookie);
+
+        Ok(())
     }
 }

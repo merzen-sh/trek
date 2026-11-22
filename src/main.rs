@@ -10,6 +10,8 @@ fn main() {
         Command::Pack(args) => trek::pack::run(&args),
         Command::Version(args) => trek::version::run(&args),
         Command::Release(args) => trek::release::run(&args),
+        #[cfg(feature = "asset-upload")]
+        Command::Upload(args) => trek::upload::run(&args),
     };
 
     if let Err(error) = result {

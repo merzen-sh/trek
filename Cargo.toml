@@ -4,11 +4,27 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
 
+[features]
+asset-upload = [
+    "dep:chromiumoxide",
+    "dep:futures-util",
+    "dep:reqwest",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:tokio",
+]
+
 [dependencies]
 anyhow = "1"
+chromiumoxide = { version = "0.9", optional = true }
 clap = { version = "4", features = ["derive"] }
+futures-util = { version = "0.3", optional = true }
 glob = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "query", "rustls", "stream", "system-proxy"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 sha2 = { version = "0.11", default-features = false }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "time"], optional = true }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
