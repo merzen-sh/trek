@@ -938,7 +938,7 @@ fn upload_refresh_cookie_requires_the_forum_cookie() -> Result<()> {
 
 #[cfg(feature = "asset-upload")]
 #[test]
-fn upload_requires_a_zip_in_dist() -> Result<()> {
+fn upload_requires_a_zip_in_the_asset_path() -> Result<()> {
     let dir = tempfile::tempdir()?;
     fs::create_dir_all(dir.path().join("dist"))?;
 
@@ -946,12 +946,31 @@ fn upload_requires_a_zip_in_dist() -> Result<()> {
         .current_dir(dir.path())
         .args(["upload"])
         .env("CFX_FORUM_COOKIE", "cookie")
-        .env_remove("ZIP_FILE")
         .output()?;
 
     assert!(!result.status.success());
     let stderr = String::from_utf8(result.stderr)?;
-    assert!(stderr.contains("No .zip file found in dist/"));
+    assert!(stderr.contains("No .zip file found in"));
+    assert!(stderr.contains(&dir.path().join("dist").display().to_string()));
+    Ok(())
+}
+
+#[cfg(feature = "asset-upload")]
+#[test]
+fn upload_uses_the_configured_asset_path() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    fs::create_dir_all(dir.path().join("assets"))?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["upload", "--asset-path", "assets"])
+        .env("CFX_FORUM_COOKIE", "cookie")
+        .output()?;
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("No .zip file found in"));
+    assert!(stderr.contains("assets"));
     Ok(())
 }
 
@@ -962,11 +981,14 @@ fn upload_help_lists_options() -> Result<()> {
 
     assert!(result.status.success());
     let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("--asset-path"));
     assert!(stdout.contains("--asset-name"));
     assert!(stdout.contains("default: the current folder name"));
+    assert!(stdout.contains("--zip-file"));
+    assert!(stdout.contains("--version"));
     assert!(stdout.contains("--refresh-cookie"));
     assert!(stdout.contains("CFX_FORUM_COOKIE"));
-    assert!(stdout.contains("ZIP_FILE"));
+    assert!(!stdout.contains("ZIP_FILE"));
     Ok(())
 }
 

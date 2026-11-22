@@ -58,7 +58,7 @@ Build with the `asset-upload` feature:
 cargo install --path . --features asset-upload
 ```
 
-The upload feature uses a locally installed Chrome or Chromium on `PATH`; it does not download a browser.
+The upload feature uses a locally installed Chrome or Chromium on `PATH`; it does not download a browser. Only `CFX_FORUM_COOKIE` is read from the environment.
 
 From a resource with a ZIP in `dist/`:
 
@@ -67,7 +67,7 @@ export CFX_FORUM_COOKIE="..."
 trek upload --asset-name "trek-core"
 ```
 
-`ASSET_NAME` is no longer read; pass `--asset-name` instead. When omitted, it defaults to the current folder name. `ZIP_FILE` and `VERSION` override the selected ZIP and inferred version. Validate the cookie without uploading:
+`--asset-path` defaults to `dist`, and `--asset-name` defaults to the current folder name. `--zip-file` and `--version` override the selected ZIP and inferred version. Validate the cookie without uploading:
 
 ```bash
 trek upload --refresh-cookie
