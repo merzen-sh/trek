@@ -27,15 +27,16 @@ const PACK_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Execute the `upload` subcommand.
 ///
-/// The command reads `CFX_FORUM_COOKIE`, `ASSET_NAME`, and the optional
-/// `ZIP_FILE` and `VERSION` environment variables, matching the original
-/// scripts. With `--refresh-cookie`, only `CFX_FORUM_COOKIE` is required.
+/// The command reads `CFX_FORUM_COOKIE` and the optional `ZIP_FILE` and
+/// `VERSION` environment variables. `--asset-name` defaults to the current
+/// folder name. With `--refresh-cookie`, only `CFX_FORUM_COOKIE` is required.
 ///
 /// # Errors
 ///
-/// Returns an error if required environment variables are missing, the browser
-/// or CFX portal cannot be reached, the ZIP cannot be read, the upload fails,
-/// or the generated pack cannot be downloaded.
+/// Returns an error if `CFX_FORUM_COOKIE` is missing, `--asset-name` is empty,
+/// the current folder name cannot be determined or is not valid UTF-8, the
+/// browser or CFX portal cannot be reached, the ZIP cannot be read, the upload
+/// fails, or the generated pack cannot be downloaded.
 pub fn run(args: &UploadArgs) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -47,8 +48,9 @@ pub fn run(args: &UploadArgs) -> Result<()> {
         return runtime.block_on(refresh_cookie(&cookie));
     }
 
-    let config = UploadConfig::from_env()?;
-    runtime.block_on(upload(config))
+    let current_dir = std::env::current_dir().context("failed to resolve current directory")?;
+    let config = UploadConfig::from_args(args.asset_name.as_deref(), &current_dir)?;
+    runtime.block_on(upload(config, &current_dir))
 }
 
 struct UploadConfig {
@@ -59,13 +61,32 @@ struct UploadConfig {
 }
 
 impl UploadConfig {
-    fn from_env() -> Result<Self> {
+    fn from_args(asset_name: Option<&str>, current_dir: &Path) -> Result<Self> {
         Ok(Self {
             forum_cookie: required_env("CFX_FORUM_COOKIE", "CFX_FORUM_COOKIE not set")?,
-            asset_name: required_env("ASSET_NAME", "ASSET_NAME not set (e.g. trek-core)")?,
+            asset_name: resolve_asset_name(asset_name, current_dir)?,
             zip_file: optional_env("ZIP_FILE"),
             version: optional_env("VERSION"),
         })
+    }
+}
+
+fn resolve_asset_name(requested: Option<&str>, current_dir: &Path) -> Result<String> {
+    match requested {
+        Some(name) => match name.trim() {
+            "" => bail!("--asset-name must not be empty"),
+            trimmed => Ok(trimmed.to_string()),
+        },
+        None => current_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                anyhow!(
+                    "cannot derive an asset name from {}; pass --asset-name <NAME>",
+                    current_dir.display()
+                )
+            }),
     }
 }
 
@@ -85,10 +106,8 @@ async fn refresh_cookie(forum_cookie: &str) -> Result<()> {
     close
 }
 
-async fn upload(config: UploadConfig) -> Result<()> {
-    let dist = std::env::current_dir()
-        .context("failed to resolve current directory")?
-        .join("dist");
+async fn upload(config: UploadConfig, current_dir: &Path) -> Result<()> {
+    let dist = current_dir.join("dist");
     let zip = SelectedZip::select(&dist, config.zip_file.as_deref())?;
 
     let session = BrowserSession::launch().await?;
@@ -380,6 +399,33 @@ mod tests {
             version: Some(version.to_string()),
             packs: None,
         }
+    }
+
+    #[test]
+    fn resolves_explicit_and_default_asset_names() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let folder = dir
+            .path()
+            .file_name()
+            .expect("temporary directory has a name")
+            .to_string_lossy()
+            .into_owned();
+
+        assert_eq!(
+            resolve_asset_name(Some("trek-core"), dir.path()).expect("explicit asset name"),
+            "trek-core"
+        );
+        assert_eq!(
+            resolve_asset_name(Some("  trek-core  "), dir.path()).expect("trimmed asset name"),
+            "trek-core"
+        );
+        assert_eq!(
+            resolve_asset_name(None, dir.path()).expect("default asset name"),
+            folder
+        );
+        assert!(resolve_asset_name(Some(""), dir.path()).is_err());
+        assert!(resolve_asset_name(Some("   "), dir.path()).is_err());
+        assert!(resolve_asset_name(None, Path::new("/")).is_err());
     }
 
     #[test]

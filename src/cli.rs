@@ -20,8 +20,9 @@ pub enum Command {
     Release(ReleaseArgs),
     /// Upload a packed asset to the CFX portal.
     ///
-    /// Reads `CFX_FORUM_COOKIE` and `ASSET_NAME`, plus optional `ZIP_FILE` and
-    /// `VERSION`. ZIP files are selected from `dist/`.
+    /// Reads `CFX_FORUM_COOKIE`, plus optional `ZIP_FILE` and `VERSION`.
+    /// `--asset-name` defaults to the current folder name, and ZIP files are
+    /// selected from `dist/`.
     #[cfg(feature = "asset-upload")]
     Upload(UploadArgs),
 }
@@ -130,6 +131,10 @@ pub struct ReleaseArgs {
 #[cfg(feature = "asset-upload")]
 #[derive(Debug, Args)]
 pub struct UploadArgs {
+    /// CFX asset name (default: the current folder name).
+    #[arg(long, value_name = "NAME")]
+    pub asset_name: Option<String>,
+
     /// Validate the CFX forum cookie and portal login without uploading.
     #[arg(long)]
     pub refresh_cookie: bool,
@@ -276,12 +281,34 @@ mod tests {
     #[cfg(feature = "asset-upload")]
     #[test]
     fn parses_upload_options() -> anyhow::Result<()> {
-        let cli = Cli::try_parse_from(["trek", "upload", "--refresh-cookie"])?;
+        let cli = Cli::try_parse_from([
+            "trek",
+            "upload",
+            "--asset-name",
+            "trek-core",
+            "--refresh-cookie",
+        ])?;
 
         let Command::Upload(args) = cli.command else {
             anyhow::bail!("expected upload command");
         };
+        assert_eq!(args.asset_name.as_deref(), Some("trek-core"));
         assert!(args.refresh_cookie);
+
+        Ok(())
+    }
+
+    // Default resolution is covered by upload::tests::resolves_explicit_and_default_asset_names.
+    #[cfg(feature = "asset-upload")]
+    #[test]
+    fn upload_asset_name_is_optional() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["trek", "upload"])?;
+
+        let Command::Upload(args) = cli.command else {
+            anyhow::bail!("expected upload command");
+        };
+        assert!(args.asset_name.is_none());
+        assert!(!args.refresh_cookie);
 
         Ok(())
     }
