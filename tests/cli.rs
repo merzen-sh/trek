@@ -927,21 +927,6 @@ fn upload_refresh_cookie_requires_the_forum_cookie() -> Result<()> {
 
 #[cfg(feature = "asset-upload")]
 #[test]
-fn upload_requires_an_asset_name() -> Result<()> {
-    let result = trek()
-        .args(["upload"])
-        .env("CFX_FORUM_COOKIE", "cookie")
-        .env_remove("ASSET_NAME")
-        .output()?;
-
-    assert!(!result.status.success());
-    let stderr = String::from_utf8(result.stderr)?;
-    assert!(stderr.contains("ASSET_NAME not set"));
-    Ok(())
-}
-
-#[cfg(feature = "asset-upload")]
-#[test]
 fn upload_requires_a_zip_in_dist() -> Result<()> {
     let dir = tempfile::tempdir()?;
     fs::create_dir_all(dir.path().join("dist"))?;
@@ -950,7 +935,6 @@ fn upload_requires_a_zip_in_dist() -> Result<()> {
         .current_dir(dir.path())
         .args(["upload"])
         .env("CFX_FORUM_COOKIE", "cookie")
-        .env("ASSET_NAME", "trek-core")
         .env_remove("ZIP_FILE")
         .output()?;
 
@@ -962,11 +946,13 @@ fn upload_requires_a_zip_in_dist() -> Result<()> {
 
 #[cfg(feature = "asset-upload")]
 #[test]
-fn upload_help_lists_refresh_cookie() -> Result<()> {
+fn upload_help_lists_options() -> Result<()> {
     let result = trek().args(["upload", "--help"]).output()?;
 
     assert!(result.status.success());
     let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("--asset-name"));
+    assert!(stdout.contains("default: the current folder name"));
     assert!(stdout.contains("--refresh-cookie"));
     assert!(stdout.contains("CFX_FORUM_COOKIE"));
     assert!(stdout.contains("ZIP_FILE"));

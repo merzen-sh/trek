@@ -64,11 +64,10 @@ From a resource with a ZIP in `dist/`:
 
 ```bash
 export CFX_FORUM_COOKIE="..."
-export ASSET_NAME="trek-core"
-trek upload
+trek upload --asset-name "trek-core"
 ```
 
-`ZIP_FILE` and `VERSION` override the selected ZIP and inferred version. Validate the cookie without uploading:
+`ASSET_NAME` is no longer read; pass `--asset-name` instead. When omitted, it defaults to the current folder name. `ZIP_FILE` and `VERSION` override the selected ZIP and inferred version. Validate the cookie without uploading:
 
 ```bash
 trek upload --refresh-cookie
