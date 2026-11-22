@@ -910,3 +910,76 @@ fn release_fails_when_output_path_is_a_file() -> Result<()> {
     assert!(stdout.contains("failed to create output directory"));
     Ok(())
 }
+
+#[cfg(feature = "asset-upload")]
+#[test]
+fn upload_refresh_cookie_requires_the_forum_cookie() -> Result<()> {
+    let result = trek()
+        .args(["upload", "--refresh-cookie"])
+        .env_remove("CFX_FORUM_COOKIE")
+        .output()?;
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("CFX_FORUM_COOKIE not set"));
+    Ok(())
+}
+
+#[cfg(feature = "asset-upload")]
+#[test]
+fn upload_requires_an_asset_name() -> Result<()> {
+    let result = trek()
+        .args(["upload"])
+        .env("CFX_FORUM_COOKIE", "cookie")
+        .env_remove("ASSET_NAME")
+        .output()?;
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("ASSET_NAME not set"));
+    Ok(())
+}
+
+#[cfg(feature = "asset-upload")]
+#[test]
+fn upload_requires_a_zip_in_dist() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    fs::create_dir_all(dir.path().join("dist"))?;
+
+    let result = trek()
+        .current_dir(dir.path())
+        .args(["upload"])
+        .env("CFX_FORUM_COOKIE", "cookie")
+        .env("ASSET_NAME", "trek-core")
+        .env_remove("ZIP_FILE")
+        .output()?;
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("No .zip file found in dist/"));
+    Ok(())
+}
+
+#[cfg(feature = "asset-upload")]
+#[test]
+fn upload_help_lists_refresh_cookie() -> Result<()> {
+    let result = trek().args(["upload", "--help"]).output()?;
+
+    assert!(result.status.success());
+    let stdout = String::from_utf8(result.stdout)?;
+    assert!(stdout.contains("--refresh-cookie"));
+    assert!(stdout.contains("CFX_FORUM_COOKIE"));
+    assert!(stdout.contains("ZIP_FILE"));
+    Ok(())
+}
+
+#[cfg(not(feature = "asset-upload"))]
+#[test]
+fn upload_is_unavailable_without_the_feature() -> Result<()> {
+    let result = trek().args(["upload"]).output()?;
+
+    assert!(!result.status.success());
+    let stderr = String::from_utf8(result.stderr)?;
+    assert!(stderr.contains("unrecognized subcommand 'upload'"));
+    Ok(())
+}
