@@ -373,8 +373,8 @@ pub(crate) fn default_output(input: &Path) -> PathBuf {
 /// The result of validating and writing a pack operation.
 ///
 /// Post-read failures (validation, collision checks, writing, and hashing) are
-/// stored in [`Self::failure`] so the caller can render a report first. Callers
-/// must return that error after rendering.
+/// stored in [`Self::failure`] so the caller can either render a report
+/// (`pack`) or return the error directly (`release`). Callers must not drop it.
 #[must_use = "a pack can fail without returning Err; inspect `failure`"]
 pub(crate) struct PackOutcome {
     pub(crate) manifest: Manifest,
@@ -395,7 +395,8 @@ impl PackOutcome {
 /// # Errors
 ///
 /// Returns an error if the pattern file cannot be read. Post-read failures are
-/// stored in [`PackOutcome::failure`] so the caller can render a report first.
+/// stored in [`PackOutcome::failure`] for the caller to render (`pack`) or
+/// return directly (`release`).
 pub(crate) fn execute(args: &PackArgs) -> Result<PackOutcome> {
     let pattern_file = args.input.join(".pack");
     let manifest = Manifest::read(&pattern_file)?;

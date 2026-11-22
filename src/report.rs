@@ -88,7 +88,10 @@ pub fn render_markdown(
     report
 }
 
-/// Render a Markdown report for a completed or failed release.
+/// Render the Markdown report for a release that finished packing.
+///
+/// `release::run` calls this only on success; failed releases are returned as
+/// plain errors and never rendered as Markdown.
 #[must_use]
 pub fn render_release(
     resource_manifest: &Path,
@@ -110,35 +113,6 @@ pub fn render_release(
     );
     let _ = writeln!(report, "- **Version:** {}", version.label());
     render_report_body(&mut report, manifest, plan, output, outcome, checksum);
-    report
-}
-
-/// Render a Markdown report for a release that stopped before packing.
-#[must_use]
-pub fn render_release_failure(
-    resource_manifest: &Path,
-    version: Option<ReleaseVersion<'_>>,
-    error: &str,
-) -> String {
-    let mut report = String::new();
-
-    let _ = writeln!(report, "# Release Report");
-    let _ = writeln!(report);
-    let _ = writeln!(
-        report,
-        "- **Resource manifest:** `{}`",
-        resource_manifest.display()
-    );
-    if let Some(version) = version {
-        let _ = writeln!(report, "- **Version:** {}", version.label());
-    }
-    let _ = writeln!(report, "- **Status:** Failed: {}", single_line(error));
-    let _ = writeln!(report);
-    let _ = writeln!(report, "## Problems");
-    let _ = writeln!(report);
-    let _ = writeln!(report, "| Error |");
-    let _ = writeln!(report, "| --- |");
-    let _ = writeln!(report, "| {} |", code_cell(error));
     report
 }
 
@@ -566,23 +540,5 @@ mod tests {
         );
 
         assert!(report.contains("- **Version:** `1.2.3` -> `1.2.4`"));
-    }
-
-    #[test]
-    fn release_failure_report_lists_error() {
-        let report = render_release_failure(
-            Path::new("/tmp/fxmanifest.lua"),
-            Some(ReleaseVersion::Bumped {
-                from: "1.2.3",
-                to: "1.2.4",
-            }),
-            "failed to read pattern file",
-        );
-
-        assert!(report.contains("# Release Report"));
-        assert!(report.contains("- **Resource manifest:** `/tmp/fxmanifest.lua`"));
-        assert!(report.contains("- **Version:** `1.2.3` -> `1.2.4`"));
-        assert!(report.contains("- **Status:** Failed: failed to read pattern file"));
-        assert!(report.contains("| `failed to read pattern file` |"));
     }
 }

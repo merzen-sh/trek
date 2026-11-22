@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::cli::{PackArgs, ReleaseArgs};
 use crate::pack;
-use crate::report::{Checksum, Outcome, ReleaseVersion, render_release, render_release_failure};
+use crate::report::{Checksum, Outcome, ReleaseVersion, render_release};
 use crate::version::{self, Bump, VersionChange};
 
 /// Execute the `release` subcommand: bump the version, then pack.
@@ -14,53 +14,27 @@ use crate::version::{self, Bump, VersionChange};
 /// The output directory is created when missing. A successful version bump is
 /// not rolled back if packing fails, matching the bump-then-pack order.
 ///
+/// On success, prints the Markdown Release Report. Failures are returned as
+/// errors and printed by `main` as plain text, never as a Markdown report.
+///
 /// # Errors
 ///
 /// Returns an error if the version cannot be bumped, the output directory
 /// cannot be created, the pattern file cannot be read, validation fails, the
 /// archive cannot be written or hashed, or the report cannot be printed.
 pub fn run(args: &ReleaseArgs) -> Result<()> {
-    let bump = match Bump::from_flags(args.patch, args.minor, args.major)
-        .context("invalid version flags")
-    {
-        Ok(bump) => bump,
-        Err(error) => {
-            write_stdout(&render_release_failure(
-                &args.manifest,
-                None,
-                &format!("{error:#}"),
-            ))?;
-            return Err(error);
-        }
-    };
-
-    let change = match version::bump_manifest(&args.manifest, bump) {
-        Ok(change) => change,
-        Err(error) => {
-            write_stdout(&render_release_failure(
-                &args.manifest,
-                None,
-                &format!("{error:#}"),
-            ))?;
-            return Err(error);
-        }
-    };
+    let bump =
+        Bump::from_flags(args.patch, args.minor, args.major).context("invalid version flags")?;
+    let change = version::bump_manifest(&args.manifest, bump)?;
 
     let input = pack_input(&args.manifest);
     let output = args.output.join(pack::default_output(&input));
-    if let Err(error) = fs::create_dir_all(&args.output).with_context(|| {
+    fs::create_dir_all(&args.output).with_context(|| {
         format!(
             "failed to create output directory {}",
             args.output.display()
         )
-    }) {
-        write_stdout(&render_release_failure(
-            &args.manifest,
-            Some(release_version(&change)),
-            &format!("{error:#}"),
-        ))?;
-        return Err(error);
-    }
+    })?;
 
     let pack_args = PackArgs {
         input,
@@ -69,44 +43,31 @@ pub fn run(args: &ReleaseArgs) -> Result<()> {
         report: false,
         sha256: args.sha256,
     };
-
-    match pack::execute(&pack_args) {
-        Ok(outcome) => {
-            let failure_message = outcome.failure.as_ref().map(|error| format!("{error:#}"));
-            let status = match failure_message.as_deref() {
-                Some(message) => Outcome::Failed { error: message },
-                None => Outcome::Written,
-            };
-            let checksum = if args.sha256 {
-                Some(match outcome.checksum.as_deref() {
-                    Some(checksum) => Checksum::Value(checksum),
-                    None => Checksum::Unavailable,
-                })
-            } else {
-                None
-            };
-
-            write_stdout(&render_release(
-                &args.manifest,
-                release_version(&change),
-                &outcome.manifest,
-                &outcome.plan,
-                &outcome.output,
-                status,
-                checksum,
-            ))?;
-
-            outcome.into_result()
-        }
-        Err(error) => {
-            write_stdout(&render_release_failure(
-                &args.manifest,
-                Some(release_version(&change)),
-                &format!("{error:#}"),
-            ))?;
-            Err(error)
-        }
+    let outcome = pack::execute(&pack_args)?;
+    if let Some(failure) = outcome.failure {
+        return Err(failure);
     }
+
+    // `pack::execute` records a hashing error in `failure`, so a successful
+    // outcome with `--sha256` always carries a checksum.
+    let checksum = if args.sha256 {
+        Some(match outcome.checksum.as_deref() {
+            Some(checksum) => Checksum::Value(checksum),
+            None => Checksum::Unavailable,
+        })
+    } else {
+        None
+    };
+
+    write_stdout(&render_release(
+        &args.manifest,
+        release_version(&change),
+        &outcome.manifest,
+        &outcome.plan,
+        &outcome.output,
+        Outcome::Written,
+        checksum,
+    ))
 }
 
 fn pack_input(manifest: &Path) -> PathBuf {

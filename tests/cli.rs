@@ -818,12 +818,17 @@ fn release_rejects_conflicting_bump_flags() -> Result<()> {
         fs::read_to_string(dir.path().join("fxmanifest.lua"))?,
         "version '1.2.3'\n"
     );
+    let stdout = String::from_utf8(result.stdout)?;
+    let stderr = String::from_utf8(result.stderr)?;
+    assert_eq!(stdout.trim(), "");
+    assert!(stderr.contains("cannot be used with"));
+    assert!(!stderr.contains("Release Report"));
     assert!(!dir.path().join(format!("{name}.zip")).exists());
     Ok(())
 }
 
 #[test]
-fn release_bump_failure_prints_report_and_exits_nonzero() -> Result<()> {
+fn release_bump_failure_prints_plain_error() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let name = directory_name(dir.path())?;
     write_file(&dir.path().join(".pack"), "*.lua\n")?;
@@ -836,14 +841,16 @@ fn release_bump_failure_prints_report_and_exits_nonzero() -> Result<()> {
 
     assert!(!result.status.success());
     let stdout = String::from_utf8(result.stdout)?;
-    assert!(stdout.contains("# Release Report"));
-    assert!(stdout.contains("failed to read manifest"));
+    let stderr = String::from_utf8(result.stderr)?;
+    assert_eq!(stdout.trim(), "");
+    assert!(stderr.contains("error: failed to read manifest"));
+    assert!(!stderr.contains("Release Report"));
     assert!(!dir.path().join(format!("{name}.zip")).exists());
     Ok(())
 }
 
 #[test]
-fn release_pack_failure_prints_report_and_exits_nonzero() -> Result<()> {
+fn release_pack_failure_prints_plain_error() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let name = directory_name(dir.path())?;
     write_file(&dir.path().join("fxmanifest.lua"), "version '1.0.0'\n")?;
@@ -859,14 +866,16 @@ fn release_pack_failure_prints_report_and_exits_nonzero() -> Result<()> {
         "version '1.0.1'\n"
     );
     let stdout = String::from_utf8(result.stdout)?;
-    assert!(stdout.contains("- **Version:** `1.0.0` -> `1.0.1`"));
-    assert!(stdout.contains("failed to read pattern file"));
+    let stderr = String::from_utf8(result.stderr)?;
+    assert_eq!(stdout.trim(), "");
+    assert!(stderr.contains("failed to read pattern file"));
+    assert!(!stderr.contains("Release Report"));
     assert!(!dir.path().join(format!("{name}.zip")).exists());
     Ok(())
 }
 
 #[test]
-fn release_pack_validation_failure_reports_problems() -> Result<()> {
+fn release_pack_validation_failure_prints_plain_error() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let name = directory_name(dir.path())?;
     write_file(&dir.path().join(".pack"), "\n")?;
@@ -883,10 +892,10 @@ fn release_pack_validation_failure_reports_problems() -> Result<()> {
         "version '1.0.1'\n"
     );
     let stdout = String::from_utf8(result.stdout)?;
-    assert!(stdout.contains("- **Version:** `1.0.0` -> `1.0.1`"));
-    assert!(stdout.contains("**Status:** Failed: pack validation failed"));
-    assert!(stdout.contains("- **SHA-256:** not available"));
-    assert!(stdout.contains("## Problems"));
+    let stderr = String::from_utf8(result.stderr)?;
+    assert_eq!(stdout.trim(), "");
+    assert!(stderr.contains("pack validation failed"));
+    assert!(!stderr.contains("Release Report"));
     assert!(!dir.path().join(format!("{name}.zip")).exists());
     Ok(())
 }
@@ -907,7 +916,9 @@ fn release_fails_when_output_path_is_a_file() -> Result<()> {
 
     assert!(!result.status.success());
     let stdout = String::from_utf8(result.stdout)?;
-    assert!(stdout.contains("failed to create output directory"));
+    let stderr = String::from_utf8(result.stderr)?;
+    assert_eq!(stdout.trim(), "");
+    assert!(stderr.contains("failed to create output directory"));
     Ok(())
 }
 
